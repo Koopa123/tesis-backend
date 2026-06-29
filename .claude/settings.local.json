@@ -1,0 +1,8 @@
+{
+  "permissions": {
+    "allow": [
+      "Read(//c/Users/User/Desktop/tesis//**)",
+      "Read(//c/Users/User/Desktop/tesis/frontend/**)"
+    ]
+  }
+}

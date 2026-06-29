@@ -120,3 +120,45 @@ Requiere header `Authorization: Bearer <token>`.
 |---|---|---|
 | `vigilante` | Registro público (`/auth/registro`) | Endpoints protegidos con `require_auth` |
 | `administrador` | Script `seed_admin.py` o insert manual en Supabase | Endpoints protegidos con `require_admin` |
+
+---
+
+## Endpoints RF-1.1 a RF-1.5
+
+### Cámaras IP (RF-1.1)
+> La cámara IP solo se registra como configuración. No se verifica conectividad en el prototipo.
+
+| Método | Ruta | Rol requerido |
+|---|---|---|
+| `POST` | `/api/camaras` | administrador |
+| `GET` | `/api/camaras` | autenticado |
+| `PATCH` | `/api/camaras/{id}/estado` | administrador |
+| `DELETE` | `/api/camaras/{id}` | administrador |
+
+### Fuentes de video (RF-1.2)
+
+| Método | Ruta | Descripción |
+|---|---|---|
+| `GET` | `/api/fuentes-video` | Lista fuentes disponibles + cámaras activas |
+| `POST` | `/api/fuentes-video/seleccionar` | Valida selección de fuente |
+
+### Grabaciones previas (RF-1.5)
+
+| Método | Ruta | Descripción |
+|---|---|---|
+| `POST` | `/api/grabaciones` | Sube video (.mp4/.avi/.mov/.mkv) |
+| `GET` | `/api/grabaciones` | Lista grabaciones (admin: todas; vigilante: propias) |
+
+Los archivos se guardan en `uploads/grabaciones/` (carpeta local, no subir al repo).
+
+### Monitoreo (RF-1.3 / RF-1.4)
+
+| Método | Ruta | Descripción |
+|---|---|---|
+| `POST` | `/api/monitoreo/iniciar` | Inicia sesión de monitoreo |
+| `POST` | `/api/monitoreo/{id}/detener` | Detiene sesión activa |
+
+**Nota sobre el prototipo:**
+- `webcam`: el backend crea la sesión; el stream de video viene del navegador (frontend).
+- `grabacion_previa`: el backend registra la sesión; el procesamiento de video se integrará en la siguiente fase.
+- `camara_ip`: el backend registra la sesión; la conexión real a la cámara queda preparada para integración futura.

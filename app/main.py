@@ -4,10 +4,11 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
 
 from app.config import get_settings
 from app.database import close_pool, init_pool
-from app.routers import analisis, auth, presets
+from app.routers import analisis, auth, camaras, fuentes_video, grabaciones, monitoreo, zonas_exclusion
 
 logging.basicConfig(
     level=logging.INFO,
@@ -25,8 +26,8 @@ async def lifespan(app: FastAPI):
     - Al cerrar: libera las conexiones del pool.
     """
     # Startup
-    os.makedirs(settings.frames_folder, exist_ok=True)
-    os.makedirs(settings.videos_folder, exist_ok=True)
+    os.makedirs(settings.grabaciones_folder, exist_ok=True)
+    os.makedirs(settings.zonas_frames_folder, exist_ok=True)
     init_pool()
     logger.info("App lista ✓")
 
@@ -56,8 +57,16 @@ app.add_middleware(
 )
 
 app.include_router(auth.router)
-app.include_router(presets.router)
+app.include_router(camaras.router)
+app.include_router(fuentes_video.router)
+app.include_router(grabaciones.router)
+app.include_router(monitoreo.router)
+app.include_router(zonas_exclusion.router)
 app.include_router(analisis.router)
+
+
+os.makedirs("uploads", exist_ok=True)
+app.mount("/uploads", StaticFiles(directory="uploads"), name="uploads")
 
 
 @app.get("/", tags=["Estado"])

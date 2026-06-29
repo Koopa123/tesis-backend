@@ -1,7 +1,7 @@
 from datetime import datetime
-from typing import Any
+from typing import Literal
 
-from pydantic import BaseModel, EmailStr, Field
+from pydantic import BaseModel, EmailStr, Field, model_validator
 
 
 # ── Auth ─────────────────────────────────────────────────────────────────────
@@ -29,45 +29,166 @@ class AuthResponse(BaseModel):
     usuario: UserOut
 
 
-# ── Presets ──────────────────────────────────────────────────────────────────
+# ── Cámaras IP ───────────────────────────────────────────────────────────────
 
-class ZonasRequest(BaseModel):
-    """
-    Lista de zonas ignoradas. Cada zona es [x1, y1, x2, y2] en píxeles.
-    Ejemplo: [[0, 0, 100, 80], [500, 300, 640, 480]]
-    """
-    zonas: list[list[int]]
+class CamaraCreate(BaseModel):
+    nombre: str = Field(..., min_length=1, max_length=100)
+    direccion_ip: str = Field(..., min_length=7, max_length=255)
+    ubicacion: str = Field(..., min_length=1, max_length=255)
+    descripcion: str | None = None
+    activa: bool = True
 
 
-class PresetOut(BaseModel):
+class CamaraOut(BaseModel):
     id: int
     nombre: str
-    frame_url: str
-    zonas: list[Any]
-    fecha_creacion: str | None
+    direccion_ip: str
+    ubicacion: str
+    descripcion: str | None
+    activa: bool
+    fecha_registro: str | None
 
 
-class PresetsListOut(BaseModel):
-    presets: list[PresetOut]
+class CamaraEstadoUpdate(BaseModel):
+    activa: bool
 
 
-# ── Análisis ─────────────────────────────────────────────────────────────────
+# ── Fuentes de video ──────────────────────────────────────────────────────────
 
-class AnalisisOut(BaseModel):
-    id: int
-    nombre_video: str
-    personas_maximas: int
-    grupo_mayor_maximo: int
-    nivel_final: str
-    fecha: str | None
-    preset_nombre: str | None
+class FuenteInfo(BaseModel):
+    tipo: str
+    nombre: str
+    disponible: bool
+    nota: str | None = None
 
 
-class AnalisisListOut(BaseModel):
-    analisis: list[AnalisisOut]
+class FuentesVideoOut(BaseModel):
+    fuentes_disponibles: list[FuenteInfo]
+    camaras_ip: list[CamaraOut]
 
 
-class AnalisisUploadResponse(BaseModel):
+class SeleccionFuenteRequest(BaseModel):
+    tipo: Literal["webcam", "grabacion_previa", "camara_ip"]
+    camara_id: int | None = None
+    grabacion_id: int | None = None
+
+
+class SeleccionFuenteOut(BaseModel):
+    tipo: str
     mensaje: str
-    nombre_video: str
-    stream_url: str
+    camara_id: int | None = None
+    grabacion_id: int | None = None
+
+
+# ── Grabaciones ───────────────────────────────────────────────────────────────
+
+class GrabacionOut(BaseModel):
+    id: int
+    nombre_archivo: str
+    ruta_archivo: str
+    tipo_contenido: str | None
+    tamanio_bytes: int | None
+    usuario_id: int | None
+    fecha_carga: str | None
+    fecha_grabacion: str | None   # hora real en que fue filmada (opcional)
+
+
+class GrabacionesListOut(BaseModel):
+    grabaciones: list[GrabacionOut]
+
+
+# ── Zonas de exclusión ────────────────────────────────────────────────────────
+
+class ZonaRect(BaseModel):
+    """Rectángulo normalizado [0-1]. x+width ≤ 1 e y+height ≤ 1."""
+    x: float = Field(..., ge=0.0, le=1.0)
+    y: float = Field(..., ge=0.0, le=1.0)
+    width: float = Field(..., gt=0.0, le=1.0)
+    height: float = Field(..., gt=0.0, le=1.0)
+
+    @model_validator(mode="after")
+    def check_bounds(self) -> "ZonaRect":
+        if round(self.x + self.width, 10) > 1.0:
+            raise ValueError("x + width no puede exceder 1.0")
+        if round(self.y + self.height, 10) > 1.0:
+            raise ValueError("y + height no puede exceder 1.0")
+        return self
+
+
+class ZonaExclusionOut(BaseModel):
+    id: int
+    nombre: str
+    frame_referencia: str
+    zonas: list[ZonaRect]
+    umbral_medio: int
+    umbral_alto: int
+    ventana_segundos: float
+    cooldown_segundos: int
+    creado_por: int | None
+    activa: bool
+    fecha_creacion: str | None
+    fecha_actualizacion: str | None
+
+
+class ZonasExclusionListOut(BaseModel):
+    configuraciones: list[ZonaExclusionOut]
+
+
+# ── Sesiones de monitoreo ─────────────────────────────────────────────────────
+
+class MonitoreoIniciarRequest(BaseModel):
+    tipo_fuente: Literal["webcam", "grabacion_previa", "camara_ip"]
+    camara_id: int | None = None
+    grabacion_id: int | None = None
+    zona_exclusion_id: int | None = None
+
+
+class MonitoreoOut(BaseModel):
+    id: int
+    estado: str
+    tipo_fuente: str
+    zona_exclusion_id: int | None
+    mensaje: str
+
+
+# ── Análisis — EP-003 ─────────────────────────────────────────────────────────
+
+class DeteccionOut(BaseModel):
+    x1: float   # normalizado 0-1
+    y1: float
+    x2: float
+    y2: float
+    conf: float
+    excluida: bool
+
+
+class FrameAnalisisResult(BaseModel):
+    """Respuesta del endpoint POST /api/analisis/frame (webcam)."""
+    sesion_id: int
+    personas: int
+    nivel: str
+    alerta: bool
+    detecciones: list[DeteccionOut]
+    # Estado acumulado de la sesión
+    personas_maximas: int
+    nivel_maximo: str
+    tiempo_primera_media_seg: float | None
+    alerta_activada: bool
+
+
+class ResultadoAnalisisOut(BaseModel):
+    id: int
+    sesion_id: int
+    zona_config_id: int | None
+    personas_maximas: int
+    nivel_maximo: str
+    tiempo_primera_media_seg: float | None
+    alerta_activada: bool
+    frames_procesados: int
+    inicio_analisis: str | None
+    fin_analisis: str | None
+    fecha_registro: str | None
+
+
+class HistorialAnalisisOut(BaseModel):
+    resultados: list[ResultadoAnalisisOut]

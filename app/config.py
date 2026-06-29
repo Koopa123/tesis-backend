@@ -12,8 +12,8 @@ class Settings(BaseSettings):
     jwt_expire_hours: int = 24
 
     # Carpetas de archivos
-    frames_folder: str = "frames_referencia"
-    videos_folder: str = "videos_entrada"
+    grabaciones_folder: str = "uploads/grabaciones"
+    zonas_frames_folder: str = "uploads/frames"
 
     # CORS — en prod cambia esto a tu dominio real
     allowed_origins: list[str] = ["http://localhost:3000", "http://localhost:5173"]
