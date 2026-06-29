@@ -1,0 +1,66 @@
+# ── Entorno virtual ───────────────────────────────────────────
+.venv/
+venv/
+env/
+
+# ── Variables de entorno (NUNCA comitear) ─────────────────────
+.env
+.env.local
+.env.*.local
+
+# .env.example SÍ se comitea (no está aquí)
+
+# ── Python bytecode ───────────────────────────────────────────
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# ── Herramientas de desarrollo ────────────────────────────────
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# ── Distribución / build ──────────────────────────────────────
+dist/
+build/
+*.egg-info/
+
+# ── Logs ──────────────────────────────────────────────────────
+logs/
+*.log
+
+# ── Archivos de subida y temporales ──────────────────────────
+uploads/
+temp/
+tmp/
+
+# ── Carpetas de video y frames (generadas en runtime) ─────────
+videos/
+videos_demo/
+videos_entrada/
+outputs/
+frames/
+frames_referencia/
+runs/
+
+# ── Modelos de ML (archivos pesados) ──────────────────────────
+weights/
+modelos/
+pesos/
+*.pt
+*.pth
+*.onnx
+*.engine
+*.pkl
+*.joblib
+
+# ── Sistema operativo ─────────────────────────────────────────
+.DS_Store
+Thumbs.db
+
+# ── Editores / IDEs ───────────────────────────────────────────
+.vscode/
+.idea/
