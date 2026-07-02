@@ -14,7 +14,7 @@ import logging
 import os
 import threading
 
-from fastapi import APIRouter, Depends, File, Form, HTTPException, Query
+from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
 from fastapi.responses import StreamingResponse
 
 from app.core.security import require_auth
