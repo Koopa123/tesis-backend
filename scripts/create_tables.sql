@@ -155,6 +155,28 @@ ALTER TABLE sesiones_monitoreo ADD COLUMN IF NOT EXISTS zona_exclusion_id INTEGE
 -- EP-005: frame de evidencia (captura del momento de mayor concentración)
 ALTER TABLE resultados_analisis ADD COLUMN IF NOT EXISTS frame_evidencia TEXT;
 
+-- Garantiza a nivel de BD que nunca haya 2 sesiones 'activo' para la misma
+-- cámara al mismo tiempo, incluso ante peticiones concurrentes (una revisión
+-- "check-then-act" en la app no es atómica; esto sí lo es).
+CREATE UNIQUE INDEX IF NOT EXISTS idx_una_sesion_activa_por_camara
+    ON sesiones_monitoreo (camara_id)
+    WHERE estado = 'activo' AND tipo_fuente = 'camara_ip';
+
+-- Cámara IP: zona de exclusión por defecto (se aplica automáticamente en
+-- multicámara, donde no hay selector manual de zona por sesión como en
+-- Monitoreo de una sola cámara).
+ALTER TABLE camaras_ip ADD COLUMN IF NOT EXISTS zona_exclusion_id INTEGER;
+DO $$
+BEGIN
+    IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'fk_camara_zona') THEN
+        ALTER TABLE camaras_ip
+            ADD CONSTRAINT fk_camara_zona
+            FOREIGN KEY (zona_exclusion_id)
+            REFERENCES configuraciones_zonas_exclusion(id)
+            ON DELETE SET NULL;
+    END IF;
+END $$;
+
 -- Cámara IP: credenciales RTSP
 ALTER TABLE camaras_ip ADD COLUMN IF NOT EXISTS rtsp_usuario  VARCHAR(100) DEFAULT 'admin';
 ALTER TABLE camaras_ip ADD COLUMN IF NOT EXISTS rtsp_password VARCHAR(100);

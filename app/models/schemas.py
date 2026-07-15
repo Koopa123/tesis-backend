@@ -42,6 +42,7 @@ class CamaraCreate(BaseModel):
     rtsp_puerto: int = Field(554, ge=1, le=65535)
     rtsp_canal: int = Field(1, ge=1)
     rtsp_subtipo: int = Field(1, ge=0)
+    zona_exclusion_id: int | None = None
 
 
 class CamaraOut(BaseModel):
@@ -57,10 +58,15 @@ class CamaraOut(BaseModel):
     rtsp_puerto: int
     rtsp_canal: int
     rtsp_subtipo: int
+    zona_exclusion_id: int | None
 
 
 class CamaraEstadoUpdate(BaseModel):
     activa: bool
+
+
+class CamaraZonaUpdate(BaseModel):
+    zona_exclusion_id: int | None = None
 
 
 # ── Fuentes de video ──────────────────────────────────────────────────────────

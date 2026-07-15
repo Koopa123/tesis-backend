@@ -2,11 +2,11 @@ from app.database import get_db
 
 _COLS = (
     "id, nombre, direccion_ip, ubicacion, descripcion, activa, fecha_registro, "
-    "rtsp_usuario, rtsp_password, rtsp_puerto, rtsp_canal, rtsp_subtipo"
+    "rtsp_usuario, rtsp_password, rtsp_puerto, rtsp_canal, rtsp_subtipo, zona_exclusion_id"
 )
 # índices: 0=id, 1=nombre, 2=direccion_ip, 3=ubicacion, 4=descripcion,
 #          5=activa, 6=fecha_registro, 7=rtsp_usuario, 8=rtsp_password,
-#          9=rtsp_puerto, 10=rtsp_canal, 11=rtsp_subtipo
+#          9=rtsp_puerto, 10=rtsp_canal, 11=rtsp_subtipo, 12=zona_exclusion_id
 
 
 def create_camara(
@@ -20,6 +20,7 @@ def create_camara(
     rtsp_puerto: int = 554,
     rtsp_canal: int = 1,
     rtsp_subtipo: int = 1,
+    zona_exclusion_id: int | None = None,
 ) -> tuple:
     with get_db() as conn:
         with conn.cursor() as cur:
@@ -27,12 +28,28 @@ def create_camara(
                 f"""
                 INSERT INTO camaras_ip
                     (nombre, direccion_ip, ubicacion, descripcion, activa,
-                     rtsp_usuario, rtsp_password, rtsp_puerto, rtsp_canal, rtsp_subtipo)
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                     rtsp_usuario, rtsp_password, rtsp_puerto, rtsp_canal, rtsp_subtipo,
+                     zona_exclusion_id)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                 RETURNING {_COLS}
                 """,
                 (nombre, direccion_ip, ubicacion, descripcion, activa,
-                 rtsp_usuario, rtsp_password, rtsp_puerto, rtsp_canal, rtsp_subtipo),
+                 rtsp_usuario, rtsp_password, rtsp_puerto, rtsp_canal, rtsp_subtipo,
+                 zona_exclusion_id),
+            )
+            return cur.fetchone()
+
+
+def update_zona(camara_id: int, zona_exclusion_id: int | None) -> tuple | None:
+    with get_db() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                f"""
+                UPDATE camaras_ip SET zona_exclusion_id = %s
+                WHERE id = %s
+                RETURNING {_COLS}
+                """,
+                (zona_exclusion_id, camara_id),
             )
             return cur.fetchone()
 

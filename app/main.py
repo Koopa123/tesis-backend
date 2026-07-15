@@ -7,6 +7,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
 from app.config import get_settings
+from app.core.rtsp_manager import cancel_all_sessions
 from app.database import close_pool, init_pool
 from app.routers import alertas, analisis, auth, camaras, fuentes_video, grabaciones, monitoreo, zonas_exclusion
 
@@ -30,11 +31,25 @@ async def lifespan(app: FastAPI):
     os.makedirs(settings.zonas_frames_folder, exist_ok=True)
     os.makedirs("uploads/evidencias", exist_ok=True)
     init_pool()
+
+    # Un proceso recién iniciado no puede tener hilos de sesión vivos: cualquier
+    # sesión 'activo' en la BD a esta altura quedó así por un cierre anterior
+    # que no pasó por /detener (crash, Ctrl+C, kill). Se limpian para que no
+    # se sigan acumulando sesiones fantasma en cada reinicio.
+    from app.repositories import monitoreo_repo
+    limpiadas = monitoreo_repo.detener_todas_las_sesiones_activas()
+    if limpiadas:
+        logger.info("Limpiadas %d sesión(es) activa(s) huérfanas de un cierre anterior", limpiadas)
+
     logger.info("App lista ✓")
 
     yield  # ← la app corre aquí
 
     # Shutdown
+    # Avisar a los hilos de RTSP/video-previa que paren ANTES de cerrar el pool
+    # de BD: si siguen corriendo, pueden quedar usando una conexión justo
+    # cuando closeall() la cierra, dejando el apagado colgado indefinidamente.
+    cancel_all_sessions()
     close_pool()
     logger.info("App apagada ✓")
 

@@ -464,7 +464,7 @@ async def stream_camara_mjpeg(
     async def mjpeg_generate():
         try:
             while True:
-                await asyncio.sleep(0.12)  # ~8 fps máximo
+                await asyncio.sleep(0.04)  # ~25 fps máximo
                 with session_data["lock"]:
                     frame_bytes = session_data["frame"]
                     cancelado = session_data["cancelado"].is_set()

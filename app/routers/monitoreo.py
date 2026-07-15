@@ -1,4 +1,5 @@
 from fastapi import APIRouter, Depends, HTTPException
+from psycopg2 import errors as pg_errors
 
 from app.core.security import require_auth
 from app.models.schemas import MonitoreoIniciarRequest, MonitoreoOut
@@ -30,28 +31,76 @@ def iniciar_monitoreo(
     data: MonitoreoIniciarRequest,
     payload: dict = Depends(require_auth),
 ):
+    zona_exclusion_id = data.zona_exclusion_id
+
     if data.tipo_fuente == "camara_ip":
         if not data.camara_id:
             raise HTTPException(status_code=422, detail="Debes indicar camara_id para tipo camara_ip.")
-        if not camara_repo.get_camara(data.camara_id):
+        camara = camara_repo.get_camara(data.camara_id)
+        if not camara:
             raise HTTPException(status_code=404, detail="Cámara no encontrada.")
+        # Si no se indica zona explícitamente (ej. desde la vista multicámara,
+        # que no tiene selector de zona por sesión), usar la zona por defecto
+        # configurada en la cámara — así no se ignora silenciosamente.
+        if zona_exclusion_id is None:
+            zona_exclusion_id = camara[12]  # camara[12] = zona_exclusion_id
+
+        # Nunca dejar dos sesiones vivas para la misma cámara: si ya había una
+        # 'activo' (ej. la pestaña anterior se cerró de golpe sin pasar por
+        # /detener), se cierra primero — hilo en background y fila en BD —
+        # antes de arrancar la nueva. Sin esto, cada recarga de página apila
+        # otro hilo compitiendo por la misma cámara RTSP y el mismo lock de GPU.
+        #
+        # Esto es "check-then-act": no es atómico. Si dos peticiones para la
+        # misma cámara llegan casi al mismo tiempo (ej. React StrictMode monta
+        # el componente dos veces en desarrollo), ambas pueden pasar esta
+        # revisión antes de que la otra termine de crear su sesión. La garantía
+        # real está en el índice único parcial de la BD (idx_una_sesion_activa_
+        # por_camara); si esta revisión no alcanza a atajarlo, el INSERT de
+        # abajo choca con ese índice — se reintenta, y si de plano se pierde
+        # la carrera contra otra petición concurrente, se devuelve la sesión
+        # que sí ganó en vez de fallarle al usuario con un error feo.
+        from app.core.rtsp_manager import cancel_session as rtsp_cancel
+
+        def _cerrar_sesiones_previas() -> None:
+            for vieja in monitoreo_repo.get_sesiones_activas_por_camara(int(payload["sub"]), data.camara_id):
+                rtsp_cancel(vieja[0])  # vieja[0] = id
+                monitoreo_repo.detener_sesion(vieja[0])
+
+        _cerrar_sesiones_previas()
 
     if data.tipo_fuente == "grabacion_previa" and data.grabacion_id:
         if not grabacion_repo.get_grabacion(data.grabacion_id):
             raise HTTPException(status_code=404, detail="Grabación no encontrada.")
 
-    if data.zona_exclusion_id:
-        zona = zona_exclusion_repo.get_zona(data.zona_exclusion_id)
+    if zona_exclusion_id:
+        zona = zona_exclusion_repo.get_zona(zona_exclusion_id)
         if zona is None or not zona[9]:   # zona[9] = activa
             raise HTTPException(status_code=404, detail="Zona de exclusión no encontrada.")
 
-    sesion = monitoreo_repo.create_sesion(
-        usuario_id=int(payload["sub"]),
-        tipo_fuente=data.tipo_fuente,
-        camara_id=data.camara_id,
-        grabacion_id=data.grabacion_id,
-        zona_exclusion_id=data.zona_exclusion_id,
-    )
+    sesion = None
+    for intento in range(3):
+        try:
+            sesion = monitoreo_repo.create_sesion(
+                usuario_id=int(payload["sub"]),
+                tipo_fuente=data.tipo_fuente,
+                camara_id=data.camara_id,
+                grabacion_id=data.grabacion_id,
+                zona_exclusion_id=zona_exclusion_id,
+            )
+            break
+        except pg_errors.UniqueViolation:
+            if data.tipo_fuente != "camara_ip":
+                raise
+            if intento < 2:
+                _cerrar_sesiones_previas()
+                continue
+            # Se agotaron los reintentos: otra petición concurrente ganó la
+            # carrera de forma consistente. Devolver esa sesión ganadora en
+            # vez de fallar — funcionalmente es lo que el usuario quería.
+            sesion = monitoreo_repo.get_cualquier_sesion_activa_por_camara(data.camara_id)
+            if sesion is None:
+                raise
 
     result = _row(sesion)
     result["mensaje"] = _MENSAJES[data.tipo_fuente]

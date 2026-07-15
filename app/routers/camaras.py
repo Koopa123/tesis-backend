@@ -1,8 +1,8 @@
 from fastapi import APIRouter, Depends, HTTPException
 
 from app.core.security import require_admin, require_auth
-from app.models.schemas import CamaraCreate, CamaraEstadoUpdate, CamaraOut
-from app.repositories import camara_repo
+from app.models.schemas import CamaraCreate, CamaraEstadoUpdate, CamaraOut, CamaraZonaUpdate
+from app.repositories import camara_repo, zona_exclusion_repo
 
 router = APIRouter(prefix="/api/camaras", tags=["Cámaras IP"])
 
@@ -10,7 +10,7 @@ router = APIRouter(prefix="/api/camaras", tags=["Cámaras IP"])
 def _row(c: tuple) -> dict:
     # 0=id, 1=nombre, 2=direccion_ip, 3=ubicacion, 4=descripcion,
     # 5=activa, 6=fecha_registro, 7=rtsp_usuario, 8=rtsp_password,
-    # 9=rtsp_puerto, 10=rtsp_canal, 11=rtsp_subtipo
+    # 9=rtsp_puerto, 10=rtsp_canal, 11=rtsp_subtipo, 12=zona_exclusion_id
     return {
         "id": c[0],
         "nombre": c[1],
@@ -24,6 +24,7 @@ def _row(c: tuple) -> dict:
         "rtsp_puerto": c[9] or 554,
         "rtsp_canal": c[10] or 1,
         "rtsp_subtipo": c[11] if c[11] is not None else 1,
+        "zona_exclusion_id": c[12],
     }
 
 
@@ -33,6 +34,8 @@ def registrar_camara(
     _: dict = Depends(require_admin),
 ):
     """Registra una cámara IP con credenciales RTSP."""
+    if data.zona_exclusion_id is not None and not zona_exclusion_repo.get_zona(data.zona_exclusion_id):
+        raise HTTPException(status_code=404, detail="Zona de exclusión no encontrada.")
     camara = camara_repo.create_camara(
         nombre=data.nombre,
         direccion_ip=data.direccion_ip,
@@ -44,6 +47,7 @@ def registrar_camara(
         rtsp_puerto=data.rtsp_puerto,
         rtsp_canal=data.rtsp_canal,
         rtsp_subtipo=data.rtsp_subtipo,
+        zona_exclusion_id=data.zona_exclusion_id,
     )
     return _row(camara)
 
@@ -64,6 +68,25 @@ def actualizar_estado(
     camara = camara_repo.update_estado(camara_id, data.activa)
     if not camara:
         raise HTTPException(status_code=404, detail="Cámara no encontrada")
+    return _row(camara)
+
+
+@router.patch("/{camara_id}/zona", response_model=CamaraOut)
+def actualizar_zona(
+    camara_id: int,
+    data: CamaraZonaUpdate,
+    _: dict = Depends(require_admin),
+):
+    """
+    Asigna (o quita) la zona de exclusión por defecto de una cámara.
+    Se usa automáticamente al iniciar sesiones desde la vista multicámara,
+    donde no hay selector manual de zona por sesión como en Monitoreo.
+    """
+    if not camara_repo.get_camara(camara_id):
+        raise HTTPException(status_code=404, detail="Cámara no encontrada")
+    if data.zona_exclusion_id is not None and not zona_exclusion_repo.get_zona(data.zona_exclusion_id):
+        raise HTTPException(status_code=404, detail="Zona de exclusión no encontrada.")
+    camara = camara_repo.update_zona(camara_id, data.zona_exclusion_id)
     return _row(camara)
 
 

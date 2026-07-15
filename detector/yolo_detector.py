@@ -16,18 +16,19 @@ from threading import Lock
 
 import cv2
 import numpy as np
+import torch
 
 # ── Modelo YOLO (carga perezosa, una sola instancia) ──────────────────────────
 
 _model = None
 _model_lock = Lock()
-# Serializa TODAS las llamadas de inferencia (no solo la carga). torch/ultralytics
-# en CPU no es seguro ante llamadas concurrentes desde hilos distintos: bajo carga
-# (varias sesiones de análisis en paralelo) puede disparar un subproceso interno de
-# multiprocessing que en Windows a veces hereda el socket del servidor y lo deja
-# colgado. Sin este lock, cada hilo (webcam, video previa, cámara IP) llamaba a
-# model(frame, ...) al mismo tiempo sobre la misma instancia compartida.
+# Serializa TODAS las llamadas de inferencia (no solo la carga): el modelo es una
+# única instancia compartida entre hilos (webcam, video previa, cámara IP), y
+# ejecutar forward() concurrentemente sobre la misma instancia/GPU desde hilos
+# distintos no es seguro.
 _inference_lock = Lock()
+
+DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 
 NIVEL_ORDEN = ["sin_aglomeracion", "bajo", "medio", "alto"]
 
@@ -38,7 +39,15 @@ def _get_model():
         with _model_lock:
             if _model is None:
                 from ultralytics import YOLO
-                _model = YOLO("yolov8s.pt")
+                # .to(DEVICE) resetea internamente model.predictor a None (ver
+                # Model._apply en ultralytics). Debe terminar ANTES de publicar
+                # el modelo en _model: si otro hilo (otra cámara) ve _model ya
+                # asignado mientras .to() todavía corre, puede empezar a predecir
+                # justo cuando .to() le resetea el predictor a mitad de camino,
+                # provocando "TypeError: 'NoneType' object is not callable".
+                modelo = YOLO("yolov8s.pt")
+                modelo.to(DEVICE)
+                _model = modelo
     return _model
 
 
@@ -147,8 +156,8 @@ def procesar_frame(
     h, w = frame.shape[:2]
     model = _get_model()
     with _inference_lock:
-        # imgsz reducido (default YOLO es 640) para sostener más fps en CPU (RNF-01)
-        results = model(frame, classes=[0], conf=conf_min, imgsz=416, verbose=False)[0]
+        # imgsz reducido (default YOLO es 640) para sostener más fps (RNF-01)
+        results = model(frame, classes=[0], conf=conf_min, imgsz=416, device=DEVICE, verbose=False)[0]
 
     bottom_centers: list[tuple[float, float]] = []
     detecciones = []
@@ -323,8 +332,9 @@ def procesar_video_sync(
     umbral_m = estado.umbral_medio
     umbral_a = estado.umbral_alto
 
-    # Procesar ~10 fps máximo (RNF-01) para mantener latencia razonable
-    saltar = max(1, int(fps / 10))
+    # Procesar ~25 fps máximo (RNF-01) para mantener latencia razonable.
+    # En GPU el modelo sostiene esto sin problema; en CPU, bajar este valor.
+    saltar = max(1, int(fps / 25))
 
     try:
         while True:
@@ -453,9 +463,13 @@ def procesar_rtsp_mjpeg(
         on_frame(None, {"tipo": "error", "mensaje": "No se pudo conectar al stream RTSP."}, False)
         return
 
-    fps = cap.get(cv2.CAP_PROP_FPS) or 15.0
-    saltar = max(1, int(fps / 10))
-    frame_num = 0
+    # Control de ritmo por tiempo real (no por conteo de frames): cap.get(FPS)
+    # puede ser poco confiable o el stream puede entregar frames a ráfagas, y
+    # decidir "saltar" solo por conteo puede dejar el bucle sin freno real,
+    # saturando la CPU (JPEG encode/decode) y matando de hambre al event loop
+    # de uvicorn (GIL) aunque nada esté técnicamente en deadlock.
+    INTERVALO_MIN = 1.0 / 25  # ~25 fps máximo, en GPU. En CPU, subir este valor.
+    ultimo_procesado = 0.0
     fallos = 0
 
     zonas_exc = estado.zonas_exclusion
@@ -472,9 +486,11 @@ def procesar_rtsp_mjpeg(
                 time.sleep(0.1)
                 continue
             fallos = 0
-            frame_num += 1
-            if frame_num % saltar != 0:
+
+            ahora = time.time()
+            if ahora - ultimo_procesado < INTERVALO_MIN:
                 continue
+            ultimo_procesado = ahora
 
             _, buf = cv2.imencode(".jpg", frame, [cv2.IMWRITE_JPEG_QUALITY, 80])
             resultado = procesar_frame(buf.tobytes(), zonas_exc, umbral_m, umbral_a)

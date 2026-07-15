@@ -20,3 +20,17 @@ def cancel_session(sesion_id: int) -> None:
         data = _sessions.pop(sesion_id, None)
     if data:
         data["cancelado"].set()
+
+
+def cancel_all_sessions() -> None:
+    """
+    Señaliza a TODOS los hilos de sesión (RTSP y video previa) que se detengan.
+    Se llama al apagar la app: sin esto, los hilos en background siguen usando
+    la GPU y el pool de BD mientras el proceso intenta cerrar, y el cierre se
+    queda colgado esperando algo que nunca se le avisó que debía parar.
+    """
+    with _lock:
+        sesiones = list(_sessions.values())
+        _sessions.clear()
+    for data in sesiones:
+        data["cancelado"].set()

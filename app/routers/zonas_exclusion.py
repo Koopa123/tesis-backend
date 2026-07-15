@@ -43,8 +43,9 @@ def _parse_zonas(zonas_json: str) -> list[dict]:
         raise HTTPException(status_code=422, detail="El campo 'zonas' no es JSON válido.")
     if not isinstance(data, list):
         raise HTTPException(status_code=422, detail="El campo 'zonas' debe ser una lista.")
-    if len(data) == 0:
-        raise HTTPException(status_code=422, detail="El campo 'zonas' no puede estar vacío.")
+    # Lista vacía es válida: esta configuración también sirve solo para
+    # personalizar umbrales (medio/alto/ventana/cooldown) sin excluir
+    # ninguna área del conteo de personas.
     resultado = []
     for i, rect in enumerate(data):
         try:
