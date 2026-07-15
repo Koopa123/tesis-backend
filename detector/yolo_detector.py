@@ -43,6 +43,7 @@ def _parchear_export_formats() -> None:
     En este proyecto siempre se carga un .pt plano, así que reemplazamos esa
     función por una versión sin pandas, con exactamente los mismos datos.
     """
+    import ultralytics.engine.exporter as exporter_module
     import ultralytics.nn.autobackend as autobackend_module
 
     class _TablaFormatos:
@@ -68,7 +69,9 @@ def _parchear_export_formats() -> None:
         ["NCNN", "ncnn", "_ncnn_model", True, True],
     ]
 
-    autobackend_module.export_formats = lambda: _TablaFormatos(_FILAS)
+    _reemplazo = lambda: _TablaFormatos(_FILAS)  # noqa: E731
+    exporter_module.export_formats = _reemplazo
+    autobackend_module.export_formats = _reemplazo
 
 
 def _get_model():
