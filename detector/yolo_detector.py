@@ -103,7 +103,10 @@ def warmup() -> None:
     model = _get_model()
     frame_dummy = np.zeros((480, 640, 3), dtype=np.uint8)
     with _inference_lock:
-        model(frame_dummy, classes=[0], conf=0.40, imgsz=416, device=DEVICE, verbose=False)
+        # Envuelto en lista: un ndarray "pelado" puede terminar iterado por su
+        # primer eje (cada fila de píxeles) en vez de tratado como una sola
+        # imagen, rompiendo el preprocesamiento interno de ultralytics.
+        model([frame_dummy], classes=[0], conf=0.40, imgsz=416, device=DEVICE, verbose=False)
 
 
 # ── Lógica de detección ───────────────────────────────────────────────────────
