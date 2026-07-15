@@ -88,11 +88,17 @@ CREATE INDEX IF NOT EXISTS idx_zonas_exclusion_creado_por
     ON configuraciones_zonas_exclusion (creado_por);
 
 -- FK diferida: sesiones_monitoreo → configuraciones_zonas_exclusion
-ALTER TABLE sesiones_monitoreo
-    ADD CONSTRAINT IF NOT EXISTS fk_sesion_zona
-    FOREIGN KEY (zona_exclusion_id)
-    REFERENCES configuraciones_zonas_exclusion(id)
-    ON DELETE SET NULL;
+-- (Postgres no soporta "ADD CONSTRAINT IF NOT EXISTS"; se envuelve en DO.)
+DO $$
+BEGIN
+    IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'fk_sesion_zona') THEN
+        ALTER TABLE sesiones_monitoreo
+            ADD CONSTRAINT fk_sesion_zona
+            FOREIGN KEY (zona_exclusion_id)
+            REFERENCES configuraciones_zonas_exclusion(id)
+            ON DELETE SET NULL;
+    END IF;
+END $$;
 
 -- =============================================================
 -- EP-003 — Resultados de análisis de aglomeraciones

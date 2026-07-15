@@ -51,6 +51,19 @@ def _get_model():
     return _model
 
 
+def warmup() -> None:
+    """
+    Carga el modelo y corre una inferencia de prueba. Se llama una vez al
+    arrancar la app (lifespan) para que el costo de carga + primera
+    inferencia (compilación/autotune de kernels CUDA) se pague al iniciar
+    el servidor, no en la primera cámara que abra un usuario.
+    """
+    model = _get_model()
+    frame_dummy = np.zeros((480, 640, 3), dtype=np.uint8)
+    with _inference_lock:
+        model(frame_dummy, classes=[0], conf=0.40, imgsz=416, device=DEVICE, verbose=False)
+
+
 # ── Lógica de detección ───────────────────────────────────────────────────────
 
 def _en_zona_exclusion(
