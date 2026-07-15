@@ -17,6 +17,12 @@ COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 # Fuerza que quede la variante headless (ultralytics arrastra opencv-python normal)
 RUN pip install --no-cache-dir --force-reinstall --no-deps opencv-python-headless==4.10.0.84
+# Blindaje final: garantiza esta numpy exacta pase lo que pase con los pasos anteriores
+RUN pip install --no-cache-dir --force-reinstall numpy==1.26.4
+
+# Diagnóstico: deja constancia en el log del build de qué versiones quedaron
+# realmente instaladas, para no seguir adivinando a ciegas si algo vuelve a fallar.
+RUN python -c "import numpy, cv2, torch, pandas; print('numpy', numpy.__version__); print('opencv', cv2.__version__); print('torch', torch.__version__); print('pandas', pandas.__version__)"
 
 # Descarga los pesos de YOLOv8 AHORA (en el build, con red garantizada) para que
 # queden dentro de la imagen. El .pt está en .gitignore a propósito (no se sube a git),
