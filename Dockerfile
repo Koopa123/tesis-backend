@@ -18,6 +18,11 @@ RUN pip install --no-cache-dir -r requirements.txt
 # Fuerza que quede la variante headless (ultralytics arrastra opencv-python normal)
 RUN pip install --no-cache-dir --force-reinstall --no-deps opencv-python-headless==4.10.0.84
 
+# Descarga los pesos de YOLOv8 AHORA (en el build, con red garantizada) para que
+# queden dentro de la imagen. El .pt está en .gitignore a propósito (no se sube a git),
+# así que sin este paso el contenedor lo intentaría descargar en cada arranque.
+RUN python -c "from ultralytics import YOLO; YOLO('yolov8s.pt')"
+
 COPY . .
 
 EXPOSE 8000
