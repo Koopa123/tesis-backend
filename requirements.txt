@@ -1,3 +1,9 @@
+# torch/torchvision: build CPU explícita (pip instala CUDA por defecto si no se fija esto,
+# lo cual descarga varios GB de librerías nvidia-* inútiles en hosts sin GPU como Railway/Render).
+--extra-index-url https://download.pytorch.org/whl/cpu
+torch
+torchvision
+
 fastapi==0.115.0
 uvicorn[standard]==0.30.6
 python-multipart==0.0.9       # para Form() y UploadFile
@@ -11,8 +17,6 @@ python-dotenv==1.0.1          # carga el .env
 opencv-python-headless==4.10.0.84  # procesamiento de video (sin libs gráficas del SO, para hosts Linux en la nube)
 ultralytics==8.2.91           # YOLOv8
 
-# torch/torchvision con soporte CUDA (GPU). Instalar por separado con:
+# Para desarrollo local con GPU NVIDIA, instalar la build CUDA por separado DESPUÉS
+# de `pip install -r requirements.txt` (reemplaza la versión CPU ya instalada):
 #   pip install torch torchvision --index-url https://download.pytorch.org/whl/cu124
-# El pip install -r de este archivo instalará la versión CPU por defecto si
-# torch no está ya instalado; en una GPU NVIDIA, correr el comando de arriba
-# primero (o después) para reemplazarlo por la build CUDA.
