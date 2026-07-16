@@ -18,6 +18,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libgomp1 \
     && rm -rf /var/lib/apt/lists/*
 
+# Invalida el cache de Docker desde aquí en adelante (cambiar este valor fuerza
+# un rebuild real; Railway estaba reusando capas viejas en caché sin avisar).
+ARG CACHEBUST=20260716a
+
 # torch/torchvision: build CPU explícita, evita bajar CUDA (Railway no tiene GPU).
 # Versión fijada (no la más nueva): sospecha de conflicto de threads (OpenMP)
 # entre una build de torch muy reciente y esta versión de opencv.
