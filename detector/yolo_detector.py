@@ -79,10 +79,7 @@ def _get_model():
     if _model is None:
         with _model_lock:
             if _model is None:
-                # Prueba: con torch==2.1.2 el bug de pandas/numpy en export_formats()
-                # puede que ya no ocurra (era específico de otra combinación de
-                # versiones). Si vuelve a fallar el pandas, reactivar esta línea:
-                # _parchear_export_formats()
+                _parchear_export_formats()
                 from ultralytics import YOLO
                 # .to(DEVICE) resetea internamente model.predictor a None (ver
                 # Model._apply en ultralytics). Debe terminar ANTES de publicar

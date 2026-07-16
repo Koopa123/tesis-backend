@@ -14,7 +14,8 @@ pandas==2.2.2                  # pin: evita resolver un pandas 3.x incompatible
 # Nota: pandas 2.2.2 + numpy 1.26.4 tiene un bug binario conocido en un DataFrame
 # interno de ultralytics (AutoBackend._model_type). Se evita con un parche en
 # detector/yolo_detector.py que reemplaza esa función para no usar pandas ahí.
-ultralytics==8.2.91           # YOLOv8
+ultralytics                    # YOLOv8 (sin pin: probando si una versión más nueva
+                                # que 8.2.91 arregla el bug de cv2.resize en LetterBox)
 
 # torch/torchvision NO están aquí a propósito: se instalan aparte (build CPU explícita)
 # mediante el Build Command de Railway, antes de este archivo (ver instrucciones de despliegue).
