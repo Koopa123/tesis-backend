@@ -20,12 +20,19 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 # Invalida el cache de Docker desde aquí en adelante (cambiar este valor fuerza
 # un rebuild real; Railway estaba reusando capas viejas en caché sin avisar).
-ARG CACHEBUST=20260716b
+ARG CACHEBUST=20260908a
 
 # torch/torchvision: build CPU explícita, evita bajar CUDA (Railway no tiene GPU).
 # Versión fijada (no la más nueva): sospecha de conflicto de threads (OpenMP)
 # entre una build de torch muy reciente y esta versión de opencv.
-RUN pip install --no-cache-dir --index-url https://download.pytorch.org/whl/cpu torch==2.1.2 torchvision==0.16.2
+# --extra-index-url (no --index-url): con --index-url pip resuelve TODAS las
+# dependencias transitivas (typing-extensions, sympy, filelock...) solo desde
+# el índice de PyTorch, que no las tiene todas. Un release nuevo de
+# typing_extensions rompió esa resolución (mismatch de nombre de wheel) y pip
+# cayó a compilar desde sdist, que pide flit_core y falla porque ese índice
+# restringido no lo tiene. Con --extra-index-url, PyPI queda disponible como
+# respaldo para esas dependencias.
+RUN pip install --no-cache-dir --extra-index-url https://download.pytorch.org/whl/cpu torch==2.1.2 torchvision==0.16.2
 
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
