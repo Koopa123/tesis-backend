@@ -11,6 +11,9 @@ class Settings(BaseSettings):
     jwt_algorithm: str = "HS256"
     jwt_expire_hours: int = 24
 
+    # Edge (laptop en el local): clave compartida para /api/edge/*
+    edge_api_key: str = ""
+
     # Carpetas de archivos
     grabaciones_folder: str = "uploads/grabaciones"
     zonas_frames_folder: str = "uploads/frames"

@@ -189,3 +189,31 @@ ALTER TABLE camaras_ip ADD COLUMN IF NOT EXISTS rtsp_password VARCHAR(100);
 ALTER TABLE camaras_ip ADD COLUMN IF NOT EXISTS rtsp_puerto   INTEGER DEFAULT 554;
 ALTER TABLE camaras_ip ADD COLUMN IF NOT EXISTS rtsp_canal    INTEGER DEFAULT 1;
 ALTER TABLE camaras_ip ADD COLUMN IF NOT EXISTS rtsp_subtipo  INTEGER DEFAULT 1;
+
+-- =============================================================
+-- Edge (laptop en el local) — arquitectura edge/cloud
+-- =============================================================
+-- La laptop del local corre YOLO/OpenCV directo contra las cámaras RTSP de
+-- la red interna y solo reporta el resultado (no el video) a este endpoint.
+-- Esta tabla guarda el ÚLTIMO estado reportado por cámara (para el
+-- dashboard remoto); las alertas del edge además se insertan en `alertas`
+-- (con sesion_id/usuario_id NULL, porque no hay sesión de navegador ni
+-- usuario logueado del lado de la laptop).
+
+CREATE TABLE IF NOT EXISTS estado_camaras_edge (
+    camara_id            INTEGER PRIMARY KEY REFERENCES camaras_ip(id) ON DELETE CASCADE,
+    zona_config_id       INTEGER REFERENCES configuraciones_zonas_exclusion(id) ON DELETE SET NULL,
+    personas             INTEGER      NOT NULL DEFAULT 0,
+    nivel                VARCHAR(20)  NOT NULL DEFAULT 'sin_aglomeracion'
+                             CHECK (nivel IN ('sin_aglomeracion','bajo','medio','alto')),
+    alerta_activa        BOOLEAN      NOT NULL DEFAULT FALSE,
+    frame_evidencia_b64  TEXT,
+    fecha_actualizacion  TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+);
+
+-- alertas.sesion_id y alertas.usuario_id ya son NULLABLE (sin NOT NULL en el
+-- CREATE TABLE original) — las alertas del edge los dejan en NULL a propósito.
+
+-- Para que el historial de alertas pueda mostrar de qué cámara vino una
+-- alerta del edge (que no tiene sesion_id para llegar ahí indirectamente).
+ALTER TABLE alertas ADD COLUMN IF NOT EXISTS camara_id INTEGER REFERENCES camaras_ip(id) ON DELETE SET NULL;

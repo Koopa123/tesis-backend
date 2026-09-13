@@ -1,6 +1,6 @@
 from datetime import datetime, timedelta, timezone
 
-from fastapi import Depends, HTTPException
+from fastapi import Depends, Header, HTTPException
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from jose import JWTError, jwt
 from passlib.context import CryptContext
@@ -74,3 +74,18 @@ def require_role(*allowed_roles: str):
 
 # Atajo para endpoints exclusivos del administrador
 require_admin = require_role("administrador")
+
+
+# ── Autenticación del edge (laptop en el local) ──────────────────────────────
+
+def require_edge_key(
+    x_edge_api_key: str = Header(..., alias="X-Edge-Api-Key"),
+    settings: Settings = Depends(get_settings),
+) -> None:
+    """
+    Valida la clave compartida que usa la laptop del local para reportar
+    detecciones. No es un JWT de usuario: es una clave fija de dispositivo,
+    porque del lado del edge no hay una persona logueada en un navegador.
+    """
+    if not settings.edge_api_key or x_edge_api_key != settings.edge_api_key:
+        raise HTTPException(status_code=401, detail="Clave de edge inválida.")

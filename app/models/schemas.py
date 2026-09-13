@@ -230,7 +230,7 @@ class ZonasCriticasOut(BaseModel):
 
 class AlertaOut(BaseModel):
     id: int
-    sesion_id: int
+    sesion_id: int | None   # NULL en alertas reportadas por el edge (sin sesión de navegador)
     usuario_id: int | None
     zona_config_id: int | None
     nivel: str
@@ -238,7 +238,39 @@ class AlertaOut(BaseModel):
     atendida: bool
     fecha_alerta: str | None
     fecha_atencion: str | None
+    camara_id: int | None = None
+    camara_nombre: str | None = None
 
 
 class AlertasListOut(BaseModel):
     alertas: list[AlertaOut]
+
+
+# ── Edge (laptop en el local) ─────────────────────────────────────────────────
+
+class EdgeDeteccionIn(BaseModel):
+    """Body de POST /api/edge/deteccion — lo manda el script de la laptop."""
+    camara_id: int
+    zona_config_id: int | None = None
+    personas: int
+    nivel: Literal["sin_aglomeracion", "bajo", "medio", "alto"]
+    alerta: bool = False
+    # JPEG en base64, opcional — solo tiene sentido mandarlo cuando alerta=True
+    # (evidencia), no en cada reporte periódico.
+    frame_evidencia_b64: str | None = None
+
+
+class EstadoCamaraOut(BaseModel):
+    camara_id: int
+    camara_nombre: str
+    ubicacion: str
+    zona_config_id: int | None
+    personas: int
+    nivel: str
+    alerta_activa: bool
+    tiene_evidencia: bool
+    fecha_actualizacion: str | None
+
+
+class EstadoCamarasOut(BaseModel):
+    camaras: list[EstadoCamaraOut]

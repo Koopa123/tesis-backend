@@ -34,7 +34,8 @@ _KEEPALIVE_INTERVAL = 15  # segundos
 
 def _row(r: tuple) -> dict:
     # 0=id, 1=sesion_id, 2=usuario_id, 3=zona_config_id, 4=nivel,
-    # 5=personas, 6=atendida, 7=fecha_alerta, 8=fecha_atencion
+    # 5=personas, 6=atendida, 7=fecha_alerta, 8=fecha_atencion, 9=camara_id,
+    # 10=camara_nombre (solo presente en queries con JOIN — list/get)
     return {
         "id": r[0],
         "sesion_id": r[1],
@@ -45,6 +46,8 @@ def _row(r: tuple) -> dict:
         "atendida": r[6],
         "fecha_alerta": r[7].isoformat() if r[7] else None,
         "fecha_atencion": r[8].isoformat() if r[8] else None,
+        "camara_id": r[9] if len(r) > 9 else None,
+        "camara_nombre": r[10] if len(r) > 10 else None,
     }
 
 

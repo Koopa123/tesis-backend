@@ -2,27 +2,36 @@ from app.database import get_db
 
 _COLS = (
     "id, sesion_id, usuario_id, zona_config_id, nivel, personas, "
-    "atendida, fecha_alerta, fecha_atencion"
+    "atendida, fecha_alerta, fecha_atencion, camara_id"
+)
+
+# Con nombre de cámara (para listar/ver una alerta) — LEFT JOIN porque las
+# alertas de sesión de navegador no tienen camara_id directo (viene de la
+# sesión, no de la alerta), y las del edge sí lo traen.
+_COLS_JOIN = (
+    "a.id, a.sesion_id, a.usuario_id, a.zona_config_id, a.nivel, a.personas, "
+    "a.atendida, a.fecha_alerta, a.fecha_atencion, a.camara_id, c.nombre"
 )
 
 
 def crear_alerta(
-    sesion_id: int,
-    usuario_id: int,
+    sesion_id: int | None,
+    usuario_id: int | None,
     zona_config_id: int | None,
     nivel: str,
     personas: int,
+    camara_id: int | None = None,
 ) -> tuple:
     with get_db() as conn:
         with conn.cursor() as cur:
             cur.execute(
                 f"""
                 INSERT INTO alertas
-                    (sesion_id, usuario_id, zona_config_id, nivel, personas)
-                VALUES (%s, %s, %s, %s, %s)
+                    (sesion_id, usuario_id, zona_config_id, nivel, personas, camara_id)
+                VALUES (%s, %s, %s, %s, %s, %s)
                 RETURNING {_COLS}
                 """,
-                (sesion_id, usuario_id, zona_config_id, nivel, personas),
+                (sesion_id, usuario_id, zona_config_id, nivel, personas, camara_id),
             )
             return cur.fetchone()
 
@@ -31,7 +40,11 @@ def get_alerta(alerta_id: int) -> tuple | None:
     with get_db() as conn:
         with conn.cursor() as cur:
             cur.execute(
-                f"SELECT {_COLS} FROM alertas WHERE id = %s",
+                f"""
+                SELECT {_COLS_JOIN} FROM alertas a
+                LEFT JOIN camaras_ip c ON c.id = a.camara_id
+                WHERE a.id = %s
+                """,
                 (alerta_id,),
             )
             return cur.fetchone()
@@ -63,10 +76,10 @@ def list_alertas(
     params: list = []
 
     if usuario_id is not None:
-        conditions.append("usuario_id = %s")
+        conditions.append("a.usuario_id = %s")
         params.append(usuario_id)
     if atendida is not None:
-        conditions.append("atendida = %s")
+        conditions.append("a.atendida = %s")
         params.append(atendida)
 
     where = f"WHERE {' AND '.join(conditions)}" if conditions else ""
@@ -76,9 +89,10 @@ def list_alertas(
         with conn.cursor() as cur:
             cur.execute(
                 f"""
-                SELECT {_COLS} FROM alertas
+                SELECT {_COLS_JOIN} FROM alertas a
+                LEFT JOIN camaras_ip c ON c.id = a.camara_id
                 {where}
-                ORDER BY fecha_alerta DESC
+                ORDER BY a.fecha_alerta DESC
                 LIMIT %s
                 """,
                 params,

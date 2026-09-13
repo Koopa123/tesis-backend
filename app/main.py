@@ -10,7 +10,7 @@ from app.config import get_settings
 from app.core import singleton_lock
 from app.core.rtsp_manager import cancel_all_sessions
 from app.database import close_pool, init_pool
-from app.routers import alertas, analisis, auth, camaras, fuentes_video, grabaciones, monitoreo, zonas_exclusion
+from app.routers import alertas, analisis, auth, camaras, edge, fuentes_video, grabaciones, monitoreo, zonas_exclusion
 
 logging.basicConfig(
     level=logging.INFO,
@@ -102,6 +102,7 @@ app.include_router(monitoreo.router)
 app.include_router(zonas_exclusion.router)
 app.include_router(analisis.router)
 app.include_router(alertas.router)
+app.include_router(edge.router)
 
 
 os.makedirs("uploads", exist_ok=True)

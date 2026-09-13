@@ -45,6 +45,21 @@ class _AlertaSSEManager:
             except asyncio.QueueFull:
                 pass  # cliente lento: se descarta el evento
 
+    async def broadcast(self, data: dict) -> None:
+        """
+        Publica a TODOS los usuarios conectados, sin importar de quién sea la
+        alerta. Se usa para alertas del edge (la laptop del local), que no
+        están asociadas a un usuario_id específico como las alertas creadas
+        desde una sesión de monitoreo iniciada por un usuario.
+        """
+        with self._lock:
+            todas = [q for queues in self._queues.values() for q in queues]
+        for q in todas:
+            try:
+                q.put_nowait(data)
+            except asyncio.QueueFull:
+                pass
+
     def publish_from_thread(
         self,
         usuario_id: int,

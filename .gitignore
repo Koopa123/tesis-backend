@@ -10,6 +10,9 @@ env/
 
 # .env.example SÍ se comitea (no está aquí)
 
+# ── Config del agente edge (credenciales RTSP + API key) ──────
+edge_config.json
+
 # ── Python bytecode ───────────────────────────────────────────
 __pycache__/
 *.pyc

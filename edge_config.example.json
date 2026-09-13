@@ -1,0 +1,18 @@
+{
+  "cloud_api_url": "https://web-production-eea48.up.railway.app",
+  "edge_api_key": "PON_AQUI_LA_MISMA_EDGE_API_KEY_QUE_TIENE_RAILWAY",
+  "camaras": [
+    {
+      "camara_id": 1,
+      "rtsp_url": "rtsp://usuario:password@192.168.1.50:554/cam/realmonitor?channel=1&subtype=1",
+      "zona_config_id": null,
+      "zona_config": {
+        "umbral_medio": 4,
+        "umbral_alto": 6,
+        "ventana_segundos": 2.0,
+        "cooldown_segundos": 10,
+        "zonas": []
+      }
+    }
+  ]
+}
