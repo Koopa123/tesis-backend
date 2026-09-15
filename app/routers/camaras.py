@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException
 
 from app.core.security import require_admin, require_auth
-from app.models.schemas import CamaraCreate, CamaraEstadoUpdate, CamaraOut, CamaraZonaUpdate
+from app.models.schemas import CamaraCreate, CamaraEstadoUpdate, CamaraOut, CamaraUpdate, CamaraZonaUpdate
 from app.repositories import camara_repo, zona_exclusion_repo
 
 router = APIRouter(prefix="/api/camaras", tags=["Cámaras IP"])
@@ -56,6 +56,34 @@ def registrar_camara(
 def listar_camaras(_: dict = Depends(require_auth)):
     """Lista todas las cámaras registradas. Accesible por cualquier usuario autenticado."""
     return [_row(c) for c in camara_repo.list_camaras()]
+
+
+@router.patch("/{camara_id}", response_model=CamaraOut)
+def actualizar_camara(
+    camara_id: int,
+    data: CamaraUpdate,
+    _: dict = Depends(require_admin),
+):
+    """
+    Edita los datos/RTSP de una cámara ya registrada — ej. cuando el router
+    le reasigna otra IP por DHCP. Solo administrador. Los campos que no se
+    manden quedan sin tocar (ver CamaraUpdate).
+    """
+    if not camara_repo.get_camara(camara_id):
+        raise HTTPException(status_code=404, detail="Cámara no encontrada")
+    camara = camara_repo.update_camara(
+        camara_id,
+        nombre=data.nombre,
+        direccion_ip=data.direccion_ip,
+        ubicacion=data.ubicacion,
+        descripcion=data.descripcion,
+        rtsp_usuario=data.rtsp_usuario,
+        rtsp_password=data.rtsp_password,
+        rtsp_puerto=data.rtsp_puerto,
+        rtsp_canal=data.rtsp_canal,
+        rtsp_subtipo=data.rtsp_subtipo,
+    )
+    return _row(camara)
 
 
 @router.patch("/{camara_id}/estado", response_model=CamaraOut)

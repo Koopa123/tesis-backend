@@ -61,6 +61,25 @@ class CamaraOut(BaseModel):
     zona_exclusion_id: int | None
 
 
+class CamaraUpdate(BaseModel):
+    """
+    Edición parcial de una cámara ya registrada (ej. cuando el router le
+    reasigna otra IP por DHCP). Solo se actualizan los campos enviados —
+    omitir un campo (o mandar null) lo deja igual; para RTSP puerto/canal/
+    usuario esto significa "no tocar", y para rtsp_password/descripcion,
+    mandar "" (string vacío) sí los borra explícitamente.
+    """
+    nombre: str | None = Field(None, min_length=1, max_length=100)
+    direccion_ip: str | None = Field(None, min_length=7, max_length=255)
+    ubicacion: str | None = Field(None, min_length=1, max_length=255)
+    descripcion: str | None = None
+    rtsp_usuario: str | None = Field(None, max_length=100)
+    rtsp_password: str | None = Field(None, max_length=100)
+    rtsp_puerto: int | None = Field(None, ge=1, le=65535)
+    rtsp_canal: int | None = Field(None, ge=1)
+    rtsp_subtipo: int | None = Field(None, ge=0)
+
+
 class CamaraEstadoUpdate(BaseModel):
     activa: bool
 

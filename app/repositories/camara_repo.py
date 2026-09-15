@@ -40,6 +40,27 @@ def create_camara(
             return cur.fetchone()
 
 
+def update_camara(camara_id: int, **campos) -> tuple | None:
+    """
+    Actualiza solo los campos con valor distinto de None en `campos` (así se
+    puede editar, por ejemplo, solo la IP sin tener que volver a mandar la
+    contraseña RTSP). Si no llega ningún campo a cambiar, simplemente
+    devuelve la cámara tal como está.
+    """
+    campos = {k: v for k, v in campos.items() if v is not None}
+    if not campos:
+        return get_camara(camara_id)
+
+    sets = ", ".join(f"{k} = %s" for k in campos)
+    with get_db() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                f"UPDATE camaras_ip SET {sets} WHERE id = %s RETURNING {_COLS}",
+                (*campos.values(), camara_id),
+            )
+            return cur.fetchone()
+
+
 def update_zona(camara_id: int, zona_exclusion_id: int | None) -> tuple | None:
     with get_db() as conn:
         with conn.cursor() as cur:
