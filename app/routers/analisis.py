@@ -437,8 +437,11 @@ async def stream_camara_mjpeg(
         raise HTTPException(status_code=422, detail="Esta sesión no es de cámara IP.")
     if sesion[6] != "activo":
         raise HTTPException(status_code=409, detail="La sesión no está activa.")
-    if int(payload["sub"]) != sesion[1] and payload.get("rol") != "administrador":
-        raise HTTPException(status_code=403, detail="No tienes acceso a esta sesión.")
+    # A diferencia de webcam/grabación (sesiones personales), una sesión de
+    # cámara IP es un recurso COMPARTIDO: solo hay una activa por cámara en
+    # todo el sistema (índice único en BD), así que cualquier usuario
+    # autenticado puede verla — restringir por dueño dejaría a cualquiera
+    # que no inició la sesión atascado en "reconectando" para siempre.
 
     camara_id = sesion[3]  # sesion[3] = camara_id
     if camara_id is None:
@@ -505,8 +508,8 @@ async def stream_camara_stats(
         raise HTTPException(status_code=404, detail="Sesión no encontrada.")
     if sesion[2] != "camara_ip":
         raise HTTPException(status_code=422, detail="Esta sesión no es de cámara IP.")
-    if int(payload["sub"]) != sesion[1] and payload.get("rol") != "administrador":
-        raise HTTPException(status_code=403, detail="No tienes acceso a esta sesión.")
+    # Ver nota en stream_camara_mjpeg: sesión de cámara IP = recurso
+    # compartido, cualquier usuario autenticado puede verla.
 
     camara_id = sesion[3]
     if camara_id is None:
