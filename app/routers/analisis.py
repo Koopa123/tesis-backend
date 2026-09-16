@@ -13,6 +13,7 @@ import json
 import logging
 import os
 import threading
+import time
 from urllib.parse import quote_plus
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile
@@ -387,13 +388,27 @@ def _rtsp_session_start(
                 logger.exception("Error al guardar alerta RTSP (sesion_id=%s)", sesion_id)
 
     def worker():
-        procesar_rtsp_mjpeg(
-            rtsp_url=rtsp_url,
-            zona_config=config,
-            estado=estado,
-            cancelado_fn=cancelado.is_set,
-            on_frame=on_frame,
-        )
+        # Reintenta mientras nadie haya pedido detener la sesión explícitamente.
+        # procesar_rtsp_mjpeg() termina sola tras 3 fallos de lectura seguidos
+        # (cámara que cortó la conexión, WiFi débil, etc.) o si nunca logró
+        # conectar — sin este bucle, la sesión quedaba "zombie": activa en BD
+        # pero sin ningún hilo real detrás, hasta que alguien pedía un frame
+        # nuevo y disparaba un reconecte que a veces choca con la cámara
+        # todavía liberando la conexión anterior (~30s de video "trabado").
+        while not cancelado.is_set():
+            try:
+                procesar_rtsp_mjpeg(
+                    rtsp_url=rtsp_url,
+                    zona_config=config,
+                    estado=estado,
+                    cancelado_fn=cancelado.is_set,
+                    on_frame=on_frame,
+                )
+            except Exception:
+                logger.exception("Error inesperado en el hilo RTSP (sesion_id=%s)", sesion_id)
+            if cancelado.is_set():
+                break
+            time.sleep(5)
         rtsp_cancel(sesion_id)  # limpia la entrada del manager cuando el hilo termina
 
     t = threading.Thread(target=worker, daemon=True)
