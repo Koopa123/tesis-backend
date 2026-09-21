@@ -33,9 +33,11 @@ _KEEPALIVE_INTERVAL = 15  # segundos
 
 
 def _row(r: tuple) -> dict:
-    # 0=id, 1=sesion_id, 2=usuario_id, 3=zona_config_id, 4=nivel,
-    # 5=personas, 6=atendida, 7=fecha_alerta, 8=fecha_atencion, 9=camara_id,
-    # 10=camara_nombre (solo presente en queries con JOIN — list/get)
+    # Dos formas posibles según qué repo produjo la tupla (ver alerta_repo._COLS
+    # vs _COLS_JOIN):
+    #   _COLS      (11 cols): id..camara_id, clip_evidencia            — crear/marcar_atendida
+    #   _COLS_JOIN (12 cols): id..camara_id, camara_nombre, clip_evidencia — list/get
+    con_join = len(r) >= 12
     return {
         "id": r[0],
         "sesion_id": r[1],
@@ -47,7 +49,8 @@ def _row(r: tuple) -> dict:
         "fecha_alerta": r[7].isoformat() if r[7] else None,
         "fecha_atencion": r[8].isoformat() if r[8] else None,
         "camara_id": r[9] if len(r) > 9 else None,
-        "camara_nombre": r[10] if len(r) > 10 else None,
+        "camara_nombre": r[10] if con_join else None,
+        "clip_evidencia": r[11] if con_join else (r[10] if len(r) > 10 else None),
     }
 
 

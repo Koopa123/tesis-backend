@@ -217,3 +217,9 @@ CREATE TABLE IF NOT EXISTS estado_camaras_edge (
 -- Para que el historial de alertas pueda mostrar de qué cámara vino una
 -- alerta del edge (que no tiene sesion_id para llegar ahí indirectamente).
 ALTER TABLE alertas ADD COLUMN IF NOT EXISTS camara_id INTEGER REFERENCES camaras_ip(id) ON DELETE SET NULL;
+
+-- Clip de video de evidencia (5-8 s previos a la alerta) para monitoreo de
+-- cámara IP en vivo. Se llena de forma asíncrona tras crear la alerta (ver
+-- yolo_detector.escribir_clip / analisis._guardar_clip_alerta), por lo que
+-- queda NULL hasta que el hilo en background termine de escribir el archivo.
+ALTER TABLE alertas ADD COLUMN IF NOT EXISTS clip_evidencia TEXT;

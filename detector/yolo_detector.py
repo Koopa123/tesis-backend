@@ -32,6 +32,9 @@ DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 
 NIVEL_ORDEN = ["sin_aglomeracion", "bajo", "medio", "alto"]
 
+# Segundos de video (previos a la alerta) que se conservan como evidencia.
+DURACION_CLIP_SEGUNDOS = 8.0
+
 
 def _parchear_export_formats() -> None:
     """
@@ -296,6 +299,25 @@ class SesionAnalisisState:
         self.frames_procesados = 0
         self.frame_evidencia_bytes: bytes | None = None  # RF-5.2
 
+        # Buffer circular con los últimos DURACION_CLIP_SEGUNDOS de fotogramas
+        # ya codificados en JPEG (mismos bytes que ya se generan para el MJPEG/
+        # la inferencia, sin costo extra de encoding). Solo vive en RAM: se va
+        # pisando solo y nunca toca disco a menos que se dispare una alerta.
+        self.buffer_clip: deque = deque()      # (timestamp, jpeg_bytes)
+        self.clip_pendiente: list[tuple[float, bytes]] | None = None
+
+    def agregar_frame_clip(self, jpeg_bytes: bytes) -> None:
+        """
+        Mantiene el buffer circular de evidencia de video. O(1) amortizado:
+        un append y, como mucho, unos pocos popleft() por llamada — no decodifica
+        ni escribe nada a disco, así que no compite con el _inference_lock ni
+        agrega latencia perceptible al bucle de detección en vivo.
+        """
+        ahora = time.time()
+        self.buffer_clip.append((ahora, jpeg_bytes))
+        while self.buffer_clip and ahora - self.buffer_clip[0][0] > DURACION_CLIP_SEGUNDOS:
+            self.buffer_clip.popleft()
+
     def actualizar(self, personas: int, nivel: str) -> bool:
         """
         Registra el resultado de un frame.
@@ -333,6 +355,10 @@ class SesionAnalisisState:
                 self.ultima_alerta = ahora
                 self.alerta_activada = True
                 nueva_alerta = True
+                # Snapshot barato (copia de referencias, no de bytes) de los
+                # segundos previos ya bufferizados — el caller lo recoge y lo
+                # escribe a disco en un hilo aparte (ver escribir_clip).
+                self.clip_pendiente = list(self.buffer_clip)
 
         return nueva_alerta
 
@@ -502,6 +528,44 @@ def _dibujar_frame_cv2(
     return frame
 
 
+def escribir_clip(frames: list[tuple[float, bytes]], ruta_salida: str) -> bool:
+    """
+    Arma un archivo .mp4 corto a partir de fotogramas JPEG ya bufferizados en
+    RAM (evidencia de alerta). Decodificar ~100-200 JPEGs y escribir el video
+    toma cientos de milisegundos — SIEMPRE debe llamarse desde un hilo aparte
+    (ver analisis._guardar_clip_alerta), nunca desde el hilo de detección en
+    vivo. No usa _inference_lock ni el modelo, así que no compite por la GPU/CPU
+    que necesita la detección de otras cámaras.
+    """
+    if not frames:
+        return False
+
+    primer_frame = cv2.imdecode(np.frombuffer(frames[0][1], np.uint8), cv2.IMREAD_COLOR)
+    if primer_frame is None:
+        return False
+    h, w = primer_frame.shape[:2]
+
+    # fps real a partir del intervalo de tiempo cubierto por el buffer, para que
+    # el clip se reproduzca a velocidad natural (no acelerado ni en cámara lenta).
+    duracion = frames[-1][0] - frames[0][0]
+    fps = len(frames) / duracion if duracion > 0.5 else 10.0
+    fps = max(4.0, min(fps, 25.0))
+
+    fourcc = cv2.VideoWriter_fourcc(*"mp4v")
+    writer = cv2.VideoWriter(ruta_salida, fourcc, fps, (w, h))
+    if not writer.isOpened():
+        return False
+
+    try:
+        for _, jpeg_bytes in frames:
+            frame = cv2.imdecode(np.frombuffer(jpeg_bytes, np.uint8), cv2.IMREAD_COLOR)
+            if frame is not None and frame.shape[:2] == (h, w):
+                writer.write(frame)
+    finally:
+        writer.release()
+    return True
+
+
 # ── Procesamiento continuo de stream RTSP ────────────────────────────────────
 
 def procesar_rtsp_mjpeg(
@@ -555,7 +619,9 @@ def procesar_rtsp_mjpeg(
             ultimo_procesado = ahora
 
             _, buf = cv2.imencode(".jpg", frame, [cv2.IMWRITE_JPEG_QUALITY, 80])
-            resultado = procesar_frame(buf.tobytes(), zonas_exc, umbral_m, umbral_a)
+            frame_jpeg = buf.tobytes()
+            estado.agregar_frame_clip(frame_jpeg)  # buffer en RAM, no toca disco
+            resultado = procesar_frame(frame_jpeg, zonas_exc, umbral_m, umbral_a)
 
             es_nuevo_maximo = resultado["personas"] > estado.personas_maximas
             alerta = estado.actualizar(resultado["personas"], resultado["nivel"])

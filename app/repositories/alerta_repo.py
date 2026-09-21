@@ -2,7 +2,7 @@ from app.database import get_db
 
 _COLS = (
     "id, sesion_id, usuario_id, zona_config_id, nivel, personas, "
-    "atendida, fecha_alerta, fecha_atencion, camara_id"
+    "atendida, fecha_alerta, fecha_atencion, camara_id, clip_evidencia"
 )
 
 # Con nombre de cámara (para listar/ver una alerta) — LEFT JOIN porque las
@@ -10,7 +10,8 @@ _COLS = (
 # sesión, no de la alerta), y las del edge sí lo traen.
 _COLS_JOIN = (
     "a.id, a.sesion_id, a.usuario_id, a.zona_config_id, a.nivel, a.personas, "
-    "a.atendida, a.fecha_alerta, a.fecha_atencion, a.camara_id, c.nombre"
+    "a.atendida, a.fecha_alerta, a.fecha_atencion, a.camara_id, c.nombre, "
+    "a.clip_evidencia"
 )
 
 
@@ -64,6 +65,17 @@ def marcar_atendida(alerta_id: int) -> tuple | None:
                 (alerta_id,),
             )
             return cur.fetchone()
+
+
+def actualizar_clip(alerta_id: int, ruta: str) -> None:
+    """Guarda la ruta del clip de video de evidencia una vez que el hilo en
+    background terminó de escribirlo (ver yolo_detector.escribir_clip)."""
+    with get_db() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "UPDATE alertas SET clip_evidencia = %s WHERE id = %s",
+                (ruta, alerta_id),
+            )
 
 
 def list_alertas(

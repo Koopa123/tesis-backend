@@ -31,6 +31,7 @@ from app.repositories import alerta_repo, analisis_repo, camara_repo, grabacion_
 from detector.yolo_detector import (
     crear_estado,
     eliminar_estado,
+    escribir_clip,
     procesar_rtsp_mjpeg,
     procesar_video_sync,
 )
@@ -70,6 +71,22 @@ def _save_evidencia(sesion_id: int, frame_bytes: bytes) -> str:
     with open(ruta, "wb") as f:
         f.write(frame_bytes)
     return ruta
+
+
+def _guardar_clip_alerta(alerta_id: int, frames: list[tuple[float, bytes]]) -> None:
+    """
+    Arma y guarda el clip de video de una alerta (5-8 s previos) en un hilo
+    aparte, para no bloquear el hilo de detección en vivo de la cámara.
+    Se llama desde on_frame() en _rtsp_session_start, ya dentro de su propio
+    threading.Thread — este código nunca corre en el hilo principal.
+    """
+    try:
+        os.makedirs("uploads/evidencias", exist_ok=True)
+        ruta = f"uploads/evidencias/alerta_{alerta_id}.mp4"
+        if escribir_clip(frames, ruta):
+            alerta_repo.actualizar_clip(alerta_id, ruta)
+    except Exception:
+        logger.exception("Error al guardar clip de evidencia (alerta_id=%s)", alerta_id)
 
 
 def _row_resultado(r: tuple) -> dict:
@@ -301,6 +318,20 @@ def _rtsp_session_start(
                     "personas": resultado.get("personas", 0),
                     "fecha_alerta": db_alerta[7].isoformat() if db_alerta[7] else None,
                 }, loop)
+
+                # Evidencia en video: el buffer ya tiene los últimos ~8s en RAM
+                # (agregado en yolo_detector.agregar_frame_clip, sin costo extra).
+                # Armar el .mp4 y escribirlo a disco se hace en un hilo aparte
+                # para no bloquear este callback (que corre en el hilo de
+                # detección en vivo de esta cámara).
+                frames_clip = estado.clip_pendiente
+                estado.clip_pendiente = None
+                if frames_clip:
+                    threading.Thread(
+                        target=_guardar_clip_alerta,
+                        args=(db_alerta[0], frames_clip),
+                        daemon=True,
+                    ).start()
             except Exception:
                 logger.exception("Error al guardar alerta RTSP (sesion_id=%s)", sesion_id)
 
