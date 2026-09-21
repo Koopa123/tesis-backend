@@ -103,7 +103,7 @@ class FuentesVideoOut(BaseModel):
 
 
 class SeleccionFuenteRequest(BaseModel):
-    tipo: Literal["webcam", "grabacion_previa", "camara_ip"]
+    tipo: Literal["grabacion_previa", "camara_ip"]
     camara_id: int | None = None
     grabacion_id: int | None = None
 
@@ -172,7 +172,7 @@ class ZonasExclusionListOut(BaseModel):
 # ── Sesiones de monitoreo ─────────────────────────────────────────────────────
 
 class MonitoreoIniciarRequest(BaseModel):
-    tipo_fuente: Literal["webcam", "grabacion_previa", "camara_ip"]
+    tipo_fuente: Literal["grabacion_previa", "camara_ip"]
     camara_id: int | None = None
     grabacion_id: int | None = None
     zona_exclusion_id: int | None = None
@@ -187,29 +187,6 @@ class MonitoreoOut(BaseModel):
 
 
 # ── Análisis — EP-003 ─────────────────────────────────────────────────────────
-
-class DeteccionOut(BaseModel):
-    x1: float   # normalizado 0-1
-    y1: float
-    x2: float
-    y2: float
-    conf: float
-    excluida: bool
-
-
-class FrameAnalisisResult(BaseModel):
-    """Respuesta del endpoint POST /api/analisis/frame (webcam)."""
-    sesion_id: int
-    personas: int
-    nivel: str
-    alerta: bool
-    detecciones: list[DeteccionOut]
-    # Estado acumulado de la sesión
-    personas_maximas: int
-    nivel_maximo: str
-    tiempo_primera_media_seg: float | None
-    alerta_activada: bool
-
 
 class ResultadoAnalisisOut(BaseModel):
     id: int

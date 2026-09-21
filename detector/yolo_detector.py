@@ -2,7 +2,7 @@
 Módulo de detección YOLOv8 para EP-003.
 
 Responsabilidades:
-- Detectar personas en frames individuales (webcam o video).
+- Detectar personas en frames individuales (cámara IP o video).
 - Descartar detecciones dentro de zonas de exclusión (RF-3.2).
 - Clasificar el nivel de concentración con umbrales configurables (RF-3.3).
 - Mantener estado por sesión: ventana deslizante para alerta sostenida (RF-3.4).
@@ -23,7 +23,7 @@ import numpy as np
 _model = None
 _model_lock = Lock()
 # Serializa TODAS las llamadas de inferencia (no solo la carga): el modelo es una
-# única instancia compartida entre hilos (webcam, video previa, cámara IP), y
+# única instancia compartida entre hilos (video previa, cámara IP), y
 # ejecutar forward() concurrentemente sobre la misma instancia/GPU desde hilos
 # distintos no es seguro.
 _inference_lock = Lock()

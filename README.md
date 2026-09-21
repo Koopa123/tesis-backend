@@ -102,7 +102,6 @@ CRUD de configuraciones: polígonos normalizados (0–1), umbrales de detección
 
 | Método | Ruta | Descripción |
 |---|---|---|
-| `POST` | `/api/analisis/frame` | Analiza un frame de webcam (retorna detecciones + stats) |
 | `GET` | `/api/analisis/video/{id}/stream` | SSE de análisis de grabación previa |
 | `GET` | `/api/analisis/historial` | Historial de sesiones (admin: todo; vigilante: propias) |
 | `GET` | `/api/analisis/resultado/{id}` | Resultado de una sesión específica |

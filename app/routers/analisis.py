@@ -1,7 +1,6 @@
 """
 EP-003 — Endpoints de análisis de aglomeraciones.
 
-POST /api/analisis/frame           → procesa un frame de webcam (tiempo real)
 GET  /api/analisis/video/{id}/stream → SSE de análisis de grabación previa
 GET  /api/analisis/historial        → historial de resultados
 GET  /api/analisis/resultado/{id}   → resultado de una sesión específica
@@ -16,13 +15,12 @@ import threading
 import time
 from urllib.parse import quote_plus
 
-from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile
+from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import StreamingResponse
 
 from app.core.security import require_admin, require_auth
 from app.core.sse_manager import alerta_manager
 from app.models.schemas import (
-    FrameAnalisisResult,
     HistorialAnalisisOut,
     ResultadoAnalisisOut,
     ZonasCriticasOut,
@@ -33,8 +31,6 @@ from app.repositories import alerta_repo, analisis_repo, camara_repo, grabacion_
 from detector.yolo_detector import (
     crear_estado,
     eliminar_estado,
-    obtener_estado,
-    procesar_frame,
     procesar_rtsp_mjpeg,
     procesar_video_sync,
 )
@@ -96,85 +92,6 @@ def _row_resultado(r: tuple) -> dict:
         "fecha_registro": r[10].isoformat() if r[10] else None,
         "frame_evidencia": r[11] if len(r) > 11 else None,
         "tipo_dia": _tipo_dia(r[8]),
-    }
-
-
-# ── POST /frame — análisis de webcam ─────────────────────────────────────────
-
-@router.post("/frame", response_model=FrameAnalisisResult)
-async def analizar_frame(
-    sesion_id: int = Form(...),
-    zona_config_id: int | None = Form(None),
-    frame: UploadFile = File(...),
-    payload: dict = Depends(require_auth),
-):
-    """
-    RF-3.1–RF-3.4: Procesa un frame JPEG enviado por el navegador (webcam).
-    Mantiene estado acumulado por sesión en memoria.
-    """
-    sesion = monitoreo_repo.get_sesion(sesion_id)
-    if sesion is None:
-        raise HTTPException(status_code=404, detail="Sesión no encontrada.")
-    if sesion[6] != "activo":   # sesion[6] = estado
-        raise HTTPException(status_code=409, detail="La sesión está detenida.")
-    if int(payload["sub"]) != sesion[1] and payload.get("rol") != "administrador":
-        raise HTTPException(status_code=403, detail="No tienes acceso a esta sesión.")
-
-    # Obtener o crear estado de sesión
-    estado = obtener_estado(sesion_id)
-    if estado is None:
-        # Primera vez: cargar config de zona
-        zona_id = zona_config_id or sesion[5]  # preferir parámetro, luego el de la sesión
-        config = _zona_config_dict(zona_id)
-        estado = crear_estado(sesion_id, zona_config=config)
-
-    frame_bytes = await frame.read()
-    resultado = procesar_frame(
-        frame_bytes,
-        estado.zonas_exclusion,
-        estado.umbral_medio,
-        estado.umbral_alto,
-    )
-
-    # RF-5.2: guardar frame si supera el máximo histórico de esta sesión
-    es_nuevo_maximo = resultado["personas"] > estado.personas_maximas
-    alerta = estado.actualizar(resultado["personas"], resultado["nivel"])
-    if es_nuevo_maximo and resultado["personas"] > 0:
-        estado.frame_evidencia_bytes = frame_bytes
-    resumen = estado.resumen()
-
-    # RF-4.3 / RF-4.1: guardar alerta en BD y notificar al cliente SSE
-    if alerta:
-        zona_id_activo = zona_config_id or sesion[5]
-        try:
-            db_alerta = alerta_repo.crear_alerta(
-                sesion_id=sesion_id,
-                usuario_id=int(payload["sub"]),
-                zona_config_id=zona_id_activo,
-                nivel="alto",
-                personas=resultado["personas"],
-            )
-            await alerta_manager.publish(int(payload["sub"]), {
-                "tipo": "alerta",
-                "id": db_alerta[0],
-                "sesion_id": sesion_id,
-                "nivel": "alto",
-                "personas": resultado["personas"],
-                "fecha_alerta": db_alerta[7].isoformat() if db_alerta[7] else None,
-            })
-        except Exception:
-            logger.exception("Error al guardar/publicar alerta (sesion_id=%s)", sesion_id)
-
-    return {
-        "sesion_id": sesion_id,
-        "personas": resultado["personas"],
-        "nivel": resultado["nivel"],
-        "alerta": alerta,
-        "detecciones": resultado["detecciones"],
-        "personas_maximas": resumen["personas_maximas"],
-        "nivel_maximo": resumen["nivel_maximo"],
-        "tiempo_primera_media_seg": resumen["tiempo_primera_media_seg"],
-        "alerta_activada": resumen["alerta_activada"],
     }
 
 
@@ -452,7 +369,7 @@ async def stream_camara_mjpeg(
         raise HTTPException(status_code=422, detail="Esta sesión no es de cámara IP.")
     if sesion[6] != "activo":
         raise HTTPException(status_code=409, detail="La sesión no está activa.")
-    # A diferencia de webcam/grabación (sesiones personales), una sesión de
+    # A diferencia de grabación (sesión personal), una sesión de
     # cámara IP es un recurso COMPARTIDO: solo hay una activa por cámara en
     # todo el sistema (índice único en BD), así que cualquier usuario
     # autenticado puede verla — restringir por dueño dejaría a cualquiera

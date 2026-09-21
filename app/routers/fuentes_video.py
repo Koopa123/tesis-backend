@@ -13,12 +13,6 @@ router = APIRouter(prefix="/api/fuentes-video", tags=["Fuentes de Video"])
 
 _FUENTES_FIJAS = [
     {
-        "tipo": "webcam",
-        "nombre": "Webcam del navegador",
-        "disponible": True,
-        "nota": "La webcam se captura desde el frontend.",
-    },
-    {
         "tipo": "grabacion_previa",
         "nombre": "Grabación previa",
         "disponible": True,
@@ -94,17 +88,9 @@ def seleccionar_fuente(
             ),
         }
 
-    if data.tipo == "grabacion_previa":
-        return {
-            "tipo": data.tipo,
-            "camara_id": None,
-            "grabacion_id": data.grabacion_id,
-            "mensaje": "Grabación previa seleccionada. Inicia el monitoreo para comenzar.",
-        }
-
     return {
-        "tipo": "webcam",
+        "tipo": data.tipo,
         "camara_id": None,
-        "grabacion_id": None,
-        "mensaje": "Webcam seleccionada. El video será capturado por el navegador.",
+        "grabacion_id": data.grabacion_id,
+        "mensaje": "Grabación previa seleccionada. Inicia el monitoreo para comenzar.",
     }

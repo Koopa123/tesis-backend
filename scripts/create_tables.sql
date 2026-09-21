@@ -50,7 +50,7 @@ CREATE TABLE IF NOT EXISTS sesiones_monitoreo (
     id                  SERIAL PRIMARY KEY,
     usuario_id          INTEGER       REFERENCES usuarios(id) ON DELETE SET NULL,
     tipo_fuente         VARCHAR(20)   NOT NULL
-                            CHECK (tipo_fuente IN ('webcam', 'grabacion_previa', 'camara_ip')),
+                            CHECK (tipo_fuente IN ('grabacion_previa', 'camara_ip')),
     camara_id           INTEGER       REFERENCES camaras_ip(id) ON DELETE SET NULL,
     grabacion_id        INTEGER       REFERENCES grabaciones(id) ON DELETE SET NULL,
     zona_exclusion_id   INTEGER,      -- FK se añade después de crear la tabla de zonas

@@ -8,7 +8,6 @@ from app.repositories import camara_repo, grabacion_repo, monitoreo_repo, zona_e
 router = APIRouter(prefix="/api/monitoreo", tags=["Monitoreo"])
 
 _MENSAJES = {
-    "webcam": "Monitoreo iniciado. El video será capturado por el navegador.",
     "grabacion_previa": "Monitoreo iniciado. Usa el endpoint de análisis para procesar el video.",
     "camara_ip": "Sesión de cámara IP iniciada. Conecta el stream RTSP.",
 }
@@ -139,7 +138,7 @@ def detener_monitoreo(
         result["mensaje"] = "Monitoreo detenido correctamente."
         return result
 
-    # Guardar resultado de análisis en BD si había estado activo (webcam o camara_ip)
+    # Guardar resultado de análisis en BD si había estado activo (cámara IP)
     estado = eliminar_estado(sesion_id)
     if estado and estado.frames_procesados > 0:
         import os
