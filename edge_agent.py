@@ -10,7 +10,7 @@ POST /api/edge/deteccion autenticado con una clave de dispositivo
 
 Uso:
     1. Copiar edge_config.example.json a edge_config.json y completarlo:
-       - cloud_api_url: la URL de Railway (ej. https://web-production-eea48.up.railway.app)
+       - cloud_api_url: la URL de Railway (ej. https://tesis-backend-production-6ece.up.railway.app)
        - edge_api_key: el mismo valor que EDGE_API_KEY en las variables de Railway
        - camaras: una entrada por cámara, con el camara_id que YA tiene
          registrado en la tabla camaras_ip de la nube (créala antes desde el

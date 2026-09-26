@@ -1,5 +1,5 @@
 {
-  "cloud_api_url": "https://web-production-eea48.up.railway.app",
+  "cloud_api_url": "https://tesis-backend-production-6ece.up.railway.app",
   "edge_api_key": "PON_AQUI_LA_MISMA_EDGE_API_KEY_QUE_TIENE_RAILWAY",
   "camaras": [
     {
