@@ -69,8 +69,13 @@ def iniciar_monitoreo(
         _cerrar_sesiones_previas()
 
     if data.tipo_fuente == "grabacion_previa" and data.grabacion_id:
-        if not grabacion_repo.get_grabacion(data.grabacion_id):
+        grabacion = grabacion_repo.get_grabacion(data.grabacion_id)
+        if not grabacion:
             raise HTTPException(status_code=404, detail="Grabación no encontrada.")
+        # grabacion[5] = usuario_id: las grabaciones son personales, igual que
+        # en GET /api/grabaciones/{id}/file.
+        if grabacion[5] != int(payload["sub"]) and payload.get("rol") != "administrador":
+            raise HTTPException(status_code=403, detail="Sin acceso a esta grabación.")
 
     if zona_exclusion_id:
         zona = zona_exclusion_repo.get_zona(zona_exclusion_id)
@@ -118,6 +123,13 @@ def detener_monitoreo(
     sesion = monitoreo_repo.get_sesion(sesion_id)
     if not sesion:
         raise HTTPException(status_code=404, detail="Sesión de monitoreo no encontrada.")
+    # Una sesión de cámara IP se puede VER entre todos (recurso compartido),
+    # pero detenerla la corta para todos: solo su dueño o un administrador.
+    if int(payload["sub"]) != sesion[1] and payload.get("rol") != "administrador":   # sesion[1] = usuario_id
+        raise HTTPException(
+            status_code=403,
+            detail="Solo quien inició la sesión o un administrador puede detenerla.",
+        )
     if sesion[6] != "activo":   # sesion[6] = estado
         raise HTTPException(status_code=409, detail="La sesión ya está detenida.")
 

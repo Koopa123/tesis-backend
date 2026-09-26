@@ -1,9 +1,13 @@
+import logging
+
 from fastapi import APIRouter, Depends, HTTPException
 from psycopg2.errors import UniqueViolation
 
 from app.core.security import create_token, hash_password, require_auth, verify_password
 from app.models.schemas import AuthResponse, LoginRequest, RegisterRequest, UserOut
 from app.repositories import user_repo
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/auth", tags=["Autenticación"])
 
@@ -26,8 +30,11 @@ def registro(data: RegisterRequest):
         )
     except UniqueViolation:
         raise HTTPException(status_code=409, detail="Ese email ya está registrado")
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Error interno al crear usuario: {e}")
+    except Exception:
+        # El detalle va solo al log: devolverlo al cliente expondría mensajes
+        # internos de la base de datos.
+        logger.exception("Error inesperado al registrar un usuario")
+        raise HTTPException(status_code=500, detail="No se pudo crear la cuenta. Intenta de nuevo más tarde.")
 
     user_id, nombre, email, rol = usuario
     token = create_token(user_id, email, rol)
