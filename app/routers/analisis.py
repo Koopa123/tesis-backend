@@ -291,6 +291,10 @@ def _rtsp_session_start(
         "cancelado": cancelado,
         "estado": estado,
         "inicio": inicio,
+        # Cuántos clientes están recibiendo el MJPEG de esta sesión. Una
+        # sesión de cámara IP es compartida (ver stream_camara_mjpeg), así
+        # que el hilo solo se detiene cuando se va el último.
+        "espectadores": 0,
     }
 
     rtsp_set(sesion_id, session_data)
@@ -428,6 +432,8 @@ async def stream_camara_mjpeg(
     BOUNDARY = b"frame"
 
     async def mjpeg_generate():
+        with session_data["lock"]:
+            session_data["espectadores"] = session_data.get("espectadores", 0) + 1
         try:
             while True:
                 await asyncio.sleep(0.04)  # ~25 fps máximo
@@ -445,8 +451,17 @@ async def stream_camara_mjpeg(
                     + b"\r\n"
                 )
         finally:
-            # Detener el hilo si el cliente se desconecta
-            session_data["cancelado"].set()
+            # Detener el hilo solo cuando se desconecta el ÚLTIMO espectador.
+            # Antes lo detenía cualquiera: como la sesión de cámara IP es un
+            # recurso compartido, al cerrar una pestaña se cortaba el hilo
+            # RTSP para todos los demás, que se quedaban con la imagen
+            # congelada. Además permitía saltarse el 403 de "detener sesión
+            # ajena" con solo cerrar el navegador.
+            with session_data["lock"]:
+                session_data["espectadores"] = max(0, session_data.get("espectadores", 1) - 1)
+                ultimo = session_data["espectadores"] == 0
+            if ultimo:
+                session_data["cancelado"].set()
 
     return StreamingResponse(
         mjpeg_generate(),
