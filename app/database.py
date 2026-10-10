@@ -46,7 +46,11 @@ def _get_healthy_conn():
             with conn.cursor() as cur:
                 cur.execute("SELECT 1")
             return conn
-        except (psycopg2.OperationalError, psycopg2.InterfaceError) as exc:
+        except psycopg2.Error as exc:
+            # Cualquier error en un SELECT 1 significa que la conexión no sirve.
+            # No basta con OperationalError/InterfaceError: tras una pausa de
+            # Supabase llega como DatabaseError ("server closed the connection
+            # unexpectedly"), y si se escapa la conexión nunca vuelve al pool.
             last_error = exc
             _pool.putconn(conn, close=True)
     raise RuntimeError("No se pudo obtener una conexión saludable del pool de BD") from last_error
@@ -81,7 +85,7 @@ def get_db():
     except Exception:
         try:
             conn.rollback()
-        except (psycopg2.OperationalError, psycopg2.InterfaceError):
+        except psycopg2.Error:
             # La conexión murió a mitad de la operación (corte de red/DNS, o
             # el pooler la cerró) — no hay nada que revertir. Se descarta del
             # pool y se deja propagar la excepción ORIGINAL, no esta: si no,

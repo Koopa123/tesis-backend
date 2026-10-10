@@ -123,4 +123,12 @@ def delete_zona(zona_id: int) -> tuple | None:
                 """,
                 (zona_id,),
             )
-            return cur.fetchone()
+            row = cur.fetchone()
+            # El borrado es lógico (activa = FALSE), así que la FK ON DELETE
+            # SET NULL de camaras_ip nunca se dispara: sin esto, las cámaras
+            # seguían apuntando a una zona inactiva y no se podían monitorear.
+            cur.execute(
+                "UPDATE camaras_ip SET zona_exclusion_id = NULL WHERE zona_exclusion_id = %s",
+                (zona_id,),
+            )
+            return row

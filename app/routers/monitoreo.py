@@ -41,8 +41,12 @@ def iniciar_monitoreo(
         # Si no se indica zona explícitamente (ej. desde la vista multicámara,
         # que no tiene selector de zona por sesión), usar la zona por defecto
         # configurada en la cámara — así no se ignora silenciosamente.
-        if zona_exclusion_id is None:
-            zona_exclusion_id = camara[12]  # camara[12] = zona_exclusion_id
+        if zona_exclusion_id is None and camara[12]:  # camara[12] = zona_exclusion_id
+            zona_camara = zona_exclusion_repo.get_zona(camara[12])
+            # Una zona por defecto que ya se borró no debe impedir monitorear
+            # la cámara: se ignora, igual que si la cámara no tuviera zona.
+            if zona_camara is not None and zona_camara[9]:   # zona[9] = activa
+                zona_exclusion_id = camara[12]
 
         # Nunca dejar dos sesiones vivas para la misma cámara: si ya había una
         # 'activo' (ej. la pestaña anterior se cerró de golpe sin pasar por
