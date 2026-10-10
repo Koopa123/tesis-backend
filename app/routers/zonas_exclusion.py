@@ -1,19 +1,20 @@
 import json
 import os
-import shutil
 import uuid
 
-from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Response, UploadFile
 from pydantic import ValidationError
 
-from app.config import Settings, get_settings
 from app.core.security import require_admin
 from app.models.schemas import ZonaExclusionOut, ZonaRect, ZonasExclusionListOut
 from app.repositories import zona_exclusion_repo
 
 router = APIRouter(prefix="/api/zonas-exclusion", tags=["Zonas de exclusión"])
 
-_EXTENSIONES_FRAME = {".jpg", ".jpeg", ".png", ".webp"}
+_MIME_FRAME = {".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".png": "image/png", ".webp": "image/webp"}
+_EXTENSIONES_FRAME = set(_MIME_FRAME)
+_MAX_FRAME_BYTES = 5 * 1024 * 1024
+_RUTA_FRAME = "api/zonas-exclusion/frame"
 
 
 def _row(r: tuple) -> dict:
@@ -56,18 +57,24 @@ def _parse_zonas(zonas_json: str) -> list[dict]:
     return resultado
 
 
-def _guardar_frame(file: UploadFile, folder: str) -> str:
+def _leer_frame(file: UploadFile) -> tuple[str, bytes, str]:
+    """
+    Lee la imagen de referencia para guardarla en la BD, no en disco: Railway
+    no tiene volumen persistente (borra uploads/ en cada redespliegue) y la
+    laptop del local y la nube no comparten disco, pero sí la misma BD.
+    Devuelve (frame_referencia, bytes, mime). frame_referencia es la ruta
+    relativa del endpoint que la sirve, así el frontend la arma igual que antes.
+    """
     ext = os.path.splitext(file.filename or "")[1].lower()
     if ext not in _EXTENSIONES_FRAME:
         raise HTTPException(
             status_code=422,
             detail=f"Extensión no permitida para frame. Usa: {', '.join(sorted(_EXTENSIONES_FRAME))}",
         )
-    nombre_unico = f"{uuid.uuid4()}{ext}"
-    ruta = os.path.join(folder, nombre_unico)
-    with open(ruta, "wb") as buf:
-        shutil.copyfileobj(file.file, buf)
-    return ruta
+    datos = file.file.read(_MAX_FRAME_BYTES + 1)
+    if len(datos) > _MAX_FRAME_BYTES:
+        raise HTTPException(status_code=413, detail="La imagen de referencia supera los 5 MB.")
+    return f"{_RUTA_FRAME}/{uuid.uuid4()}{ext}", datos, _MIME_FRAME[ext]
 
 
 @router.post("", response_model=ZonaExclusionOut, status_code=201)
@@ -80,7 +87,6 @@ async def crear_zona(
     ventana_segundos: float = Form(2.0, ge=0.5, description="Duración ventana deslizante (s)"),
     cooldown_segundos: int = Form(10, ge=1, description="Pausa mínima entre alertas (s)"),
     payload: dict = Depends(require_admin),
-    settings: Settings = Depends(get_settings),
 ):
     if umbral_alto <= umbral_medio:
         raise HTTPException(
@@ -88,10 +94,12 @@ async def crear_zona(
             detail="umbral_alto debe ser mayor que umbral_medio.",
         )
     zonas_list = _parse_zonas(zonas)
-    ruta_frame = _guardar_frame(frame, settings.zonas_frames_folder)
+    ruta_frame, frame_bytes, frame_mime = _leer_frame(frame)
     row = zona_exclusion_repo.create_zona(
         nombre=nombre.strip(),
         frame_referencia=ruta_frame,
+        frame_imagen=frame_bytes,
+        frame_mime=frame_mime,
         zonas=zonas_list,
         creado_por=int(payload["sub"]),
         umbral_medio=umbral_medio,
@@ -106,6 +114,22 @@ async def crear_zona(
 def listar_zonas(payload: dict = Depends(require_admin)):
     rows = zona_exclusion_repo.list_zonas()
     return {"configuraciones": [_row(r) for r in rows]}
+
+
+@router.get("/frame/{nombre}")
+def obtener_frame(nombre: str):
+    # Sin token, igual que antes con /uploads/frames: la usa un <img>, que no
+    # puede mandar el header Authorization. El nombre es un UUID, no adivinable.
+    frame = zona_exclusion_repo.get_frame(f"{_RUTA_FRAME}/{nombre}")
+    if frame is None:
+        raise HTTPException(status_code=404, detail="Imagen no encontrada.")
+    datos, mime = frame
+    return Response(
+        content=bytes(datos),
+        media_type=mime,
+        # El nombre cambia con cada imagen nueva, así que se puede cachear.
+        headers={"Cache-Control": "private, max-age=86400, immutable"},
+    )
 
 
 @router.get("/{zona_id}", response_model=ZonaExclusionOut)
@@ -127,7 +151,6 @@ async def actualizar_zona(
     ventana_segundos: float | None = Form(None, ge=0.5),
     cooldown_segundos: int | None = Form(None, ge=1),
     payload: dict = Depends(require_admin),
-    settings: Settings = Depends(get_settings),
 ):
     existing = zona_exclusion_repo.get_zona(zona_id)
     if existing is None or not existing[9]:
@@ -138,9 +161,9 @@ async def actualizar_zona(
 
     nombre_val = nombre.strip() if nombre else None
     zonas_val = _parse_zonas(zonas) if zonas else None
-    frame_val = None
+    frame_val = frame_bytes = frame_mime = None
     if frame and frame.filename:
-        frame_val = _guardar_frame(frame, settings.zonas_frames_folder)
+        frame_val, frame_bytes, frame_mime = _leer_frame(frame)
 
     campos = [nombre_val, zonas_val, frame_val, umbral_medio, umbral_alto, ventana_segundos, cooldown_segundos]
     if all(v is None for v in campos):
@@ -150,6 +173,8 @@ async def actualizar_zona(
         zona_id=zona_id,
         nombre=nombre_val,
         frame_referencia=frame_val,
+        frame_imagen=frame_bytes,
+        frame_mime=frame_mime,
         zonas=zonas_val,
         umbral_medio=umbral_medio,
         umbral_alto=umbral_alto,

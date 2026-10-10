@@ -223,3 +223,10 @@ ALTER TABLE alertas ADD COLUMN IF NOT EXISTS camara_id INTEGER REFERENCES camara
 -- yolo_detector.escribir_clip / analisis._guardar_clip_alerta), por lo que
 -- queda NULL hasta que el hilo en background termine de escribir el archivo.
 ALTER TABLE alertas ADD COLUMN IF NOT EXISTS clip_evidencia TEXT;
+
+-- Imagen de referencia de la zona guardada en la BD (no en disco): Railway no
+-- tiene volumen persistente y la laptop del local no comparte disco con la
+-- nube. frame_referencia pasa a ser la ruta del endpoint que la sirve
+-- (api/zonas-exclusion/frame/<uuid>.<ext>).
+ALTER TABLE configuraciones_zonas_exclusion ADD COLUMN IF NOT EXISTS frame_imagen BYTEA;
+ALTER TABLE configuraciones_zonas_exclusion ADD COLUMN IF NOT EXISTS frame_mime VARCHAR(50);

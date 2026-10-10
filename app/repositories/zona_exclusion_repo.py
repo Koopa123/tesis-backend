@@ -1,5 +1,7 @@
 import json
 
+import psycopg2
+
 from app.database import get_db
 
 _COLS = (
@@ -18,6 +20,8 @@ def create_zona(
     umbral_alto: int = 6,
     ventana_segundos: float = 2.0,
     cooldown_segundos: int = 10,
+    frame_imagen: bytes | None = None,
+    frame_mime: str | None = None,
 ) -> tuple:
     with get_db() as conn:
         with conn.cursor() as cur:
@@ -26,13 +30,15 @@ def create_zona(
                 INSERT INTO configuraciones_zonas_exclusion
                     (nombre, frame_referencia, zonas,
                      umbral_medio, umbral_alto, ventana_segundos, cooldown_segundos,
-                     creado_por)
-                VALUES (%s, %s, %s::jsonb, %s, %s, %s, %s, %s)
+                     creado_por, frame_imagen, frame_mime)
+                VALUES (%s, %s, %s::jsonb, %s, %s, %s, %s, %s, %s, %s)
                 RETURNING {_COLS}
                 """,
                 (nombre, frame_referencia, json.dumps(zonas),
                  umbral_medio, umbral_alto, ventana_segundos, cooldown_segundos,
-                 creado_por),
+                 creado_por,
+                 psycopg2.Binary(frame_imagen) if frame_imagen is not None else None,
+                 frame_mime),
             )
             return cur.fetchone()
 
@@ -61,10 +67,27 @@ def get_zona(zona_id: int) -> tuple | None:
             return cur.fetchone()
 
 
+def get_frame(frame_referencia: str) -> tuple | None:
+    """(bytes, mime) de la imagen de referencia guardada en la BD, o None."""
+    with get_db() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT frame_imagen, frame_mime
+                FROM configuraciones_zonas_exclusion
+                WHERE frame_referencia = %s AND frame_imagen IS NOT NULL
+                """,
+                (frame_referencia,),
+            )
+            return cur.fetchone()
+
+
 def update_zona(
     zona_id: int,
     nombre: str | None = None,
     frame_referencia: str | None = None,
+    frame_imagen: bytes | None = None,
+    frame_mime: str | None = None,
     zonas: list | None = None,
     umbral_medio: int | None = None,
     umbral_alto: int | None = None,
@@ -80,6 +103,11 @@ def update_zona(
     if frame_referencia is not None:
         sets.append("frame_referencia = %s")
         params.append(frame_referencia)
+    if frame_imagen is not None:
+        sets.append("frame_imagen = %s")
+        params.append(psycopg2.Binary(frame_imagen))
+        sets.append("frame_mime = %s")
+        params.append(frame_mime)
     if zonas is not None:
         sets.append("zonas = %s::jsonb")
         params.append(json.dumps(zonas))
