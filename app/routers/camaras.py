@@ -1,8 +1,10 @@
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Response
 
 from app.core.security import require_admin, require_auth
 from app.models.schemas import CamaraCreate, CamaraEstadoUpdate, CamaraOut, CamaraUpdate, CamaraZonaUpdate
 from app.repositories import camara_repo, zona_exclusion_repo
+from app.routers.analisis import _build_rtsp_url
+from detector.yolo_detector import capturar_fotograma_rtsp
 
 router = APIRouter(prefix="/api/camaras", tags=["Cámaras IP"])
 
@@ -116,6 +118,33 @@ def actualizar_zona(
         raise HTTPException(status_code=404, detail="Zona de exclusión no encontrada.")
     camara = camara_repo.update_zona(camara_id, data.zona_exclusion_id)
     return _row(camara)
+
+
+@router.get("/{camara_id}/foto")
+def tomar_foto(
+    camara_id: int,
+    _: dict = Depends(require_admin),
+):
+    """
+    Toma un fotograma en vivo de la cámara, sin detecciones dibujadas, para
+    usarlo como frame de referencia al dibujar zonas de exclusión. Solo
+    funciona donde el backend alcanza la red de las cámaras (la laptop del
+    local); desde la nube las IP privadas no son accesibles.
+    """
+    camara = camara_repo.get_camara(camara_id)
+    if not camara:
+        raise HTTPException(status_code=404, detail="Cámara no encontrada")
+    jpeg = capturar_fotograma_rtsp(_build_rtsp_url(camara))
+    if jpeg is None:
+        raise HTTPException(
+            status_code=504,
+            detail=(
+                "No se pudo obtener imagen de la cámara. Revisa que esté encendida "
+                "y que este equipo esté en la misma red (desde el sistema en la "
+                "nube no se puede llegar a las cámaras del local)."
+            ),
+        )
+    return Response(content=jpeg, media_type="image/jpeg", headers={"Cache-Control": "no-store"})
 
 
 @router.delete("/{camara_id}", status_code=204)

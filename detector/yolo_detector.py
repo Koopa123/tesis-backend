@@ -566,6 +566,37 @@ def escribir_clip(frames: list[tuple[float, bytes]], ruta_salida: str) -> bool:
     return True
 
 
+# ── Foto de una cámara RTSP (frame de referencia para zonas) ────────────────
+
+def capturar_fotograma_rtsp(rtsp_url: str, descartar: int = 10) -> bytes | None:
+    """
+    Abre la cámara, toma un fotograma limpio (sin detecciones dibujadas) y
+    lo devuelve en JPEG, o None si no se pudo. Se descartan los primeros
+    fotogramas porque al conectar suelen llegar grises o a medio decodificar
+    hasta el siguiente keyframe. Los timeouts van en el constructor: con
+    cap.set() después de abrir, el de apertura ya no tiene efecto.
+    """
+    cap = cv2.VideoCapture(
+        rtsp_url,
+        cv2.CAP_FFMPEG,
+        [cv2.CAP_PROP_OPEN_TIMEOUT_MSEC, 8_000, cv2.CAP_PROP_READ_TIMEOUT_MSEC, 5_000],
+    )
+    try:
+        if not cap.isOpened():
+            return None
+        frame = None
+        for _ in range(descartar):
+            ok, leido = cap.read()
+            if ok:
+                frame = leido
+        if frame is None:
+            return None
+        ok, buf = cv2.imencode(".jpg", frame, [cv2.IMWRITE_JPEG_QUALITY, 92])
+        return buf.tobytes() if ok else None
+    finally:
+        cap.release()
+
+
 # ── Procesamiento continuo de stream RTSP ────────────────────────────────────
 
 def procesar_rtsp_mjpeg(
