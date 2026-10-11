@@ -77,6 +77,13 @@ def _parchear_export_formats() -> None:
     autobackend_module.export_formats = _reemplazo
 
 
+# Configuración final evaluada en el informe (numeral 5): YOLOv8m con
+# confianza mínima 0.60. Se eligió frente a YOLOv8s y YOLOv8l comparando
+# precisión, error de conteo, clasificación del nivel y tiempo por fotograma.
+MODELO_YOLO = "yolov8m.pt"
+CONF_MIN_DEFAULT = 0.60
+
+
 def _get_model():
     global _model
     if _model is None:
@@ -90,7 +97,7 @@ def _get_model():
                 # asignado mientras .to() todavía corre, puede empezar a predecir
                 # justo cuando .to() le resetea el predictor a mitad de camino,
                 # provocando "TypeError: 'NoneType' object is not callable".
-                modelo = YOLO("yolov8s.pt")
+                modelo = YOLO(MODELO_YOLO)
                 modelo.to(DEVICE)
                 _model = modelo
     return _model
@@ -112,7 +119,7 @@ def warmup() -> None:
         # Sin device=: el modelo ya fue movido a DEVICE con .to() en _get_model();
         # re-especificarlo aquí puede disparar una reinicialización interna del
         # backend en modo CPU que rompe el preprocesamiento (cv2.resize).
-        model([frame_dummy], classes=[0], conf=0.40, imgsz=416, verbose=False)
+        model([frame_dummy], classes=[0], conf=CONF_MIN_DEFAULT, imgsz=416, verbose=False)
 
 
 # ── Lógica de detección ───────────────────────────────────────────────────────
@@ -202,7 +209,7 @@ def procesar_frame(
     zonas_exclusion: list[dict],
     umbral_medio: int,
     umbral_alto: int,
-    conf_min: float = 0.40,
+    conf_min: float = CONF_MIN_DEFAULT,
     distancia_grupo: float = DISTANCIA_GRUPO_DEFAULT,
 ) -> dict:
     """

@@ -44,7 +44,7 @@ RUN python -c "import torch; import cv2, numpy as np; img = np.zeros((480,640,3)
 # Descarga los pesos de YOLOv8 AHORA (en el build, con red garantizada) para que
 # queden dentro de la imagen. El .pt está en .gitignore a propósito (no se sube a git),
 # así que sin este paso el contenedor lo intentaría descargar en cada arranque.
-RUN python -c "from ultralytics import YOLO; YOLO('yolov8s.pt')"
+RUN python -c "from ultralytics import YOLO; YOLO('yolov8m.pt')"
 
 COPY . .
 
