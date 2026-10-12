@@ -54,4 +54,6 @@ EXPOSE 8000
 # variable $PORT en tiempo de ejecución, y solo la forma shell expande
 # variables de entorno en el CMD. El fallback a 8000 es para correr el
 # contenedor en local sin definir PORT.
-CMD uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8000}
+# --proxy-headers: detrás del proxy de Railway, request.client.host debe ser
+# la IP real del cliente (la usa el límite de intentos de login en auth.py).
+CMD uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8000} --proxy-headers --forwarded-allow-ips="*"

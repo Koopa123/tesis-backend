@@ -1,17 +1,17 @@
 from app.database import get_db
 
 
-def create_user(nombre: str, email: str, password_hash: str, rol: str = "vigilante") -> tuple:
+def create_user(nombre: str, email: str, password_hash: str, rol: str = "vigilante", activo: bool = True) -> tuple:
     """Inserta un usuario y retorna (id, nombre, email, rol)."""
     with get_db() as conn:
         with conn.cursor() as cur:
             cur.execute(
                 """
-                INSERT INTO usuarios (nombre, email, password_hash, rol)
-                VALUES (%s, %s, %s, %s)
+                INSERT INTO usuarios (nombre, email, password_hash, rol, activo)
+                VALUES (%s, %s, %s, %s, %s)
                 RETURNING id, nombre, email, rol
                 """,
-                (nombre, email, password_hash, rol),
+                (nombre, email, password_hash, rol, activo),
             )
             return cur.fetchone()
 
