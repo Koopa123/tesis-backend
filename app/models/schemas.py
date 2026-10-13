@@ -271,3 +271,18 @@ class EstadoCamaraOut(BaseModel):
 
 class EstadoCamarasOut(BaseModel):
     camaras: list[EstadoCamaraOut]
+
+
+# ── Gestión de usuarios (solo administrador) ──────────────────────────────────
+
+class UsuarioAdminOut(BaseModel):
+    id: int
+    nombre: str
+    email: str
+    rol: str
+    activo: bool
+    fecha_creacion: datetime | None = None
+
+
+class EstadoUsuarioRequest(BaseModel):
+    activo: bool
