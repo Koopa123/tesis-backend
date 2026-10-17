@@ -65,7 +65,8 @@ def get_resultado_by_sesion(sesion_id: int) -> tuple | None:
 
 
 def list_resultados(usuario_id: int | None = None) -> list[tuple]:
-    """Admin ve todo; vigilante ve solo sus sesiones."""
+    """Admin ve todo; vigilante ve sus grabaciones y todas las sesiones de
+    cámara IP (las cámaras son del equipo, igual que sus alertas)."""
     with get_db() as conn:
         with conn.cursor() as cur:
             if usuario_id is None:
@@ -81,7 +82,7 @@ def list_resultados(usuario_id: int | None = None) -> list[tuple]:
                     f"""
                     SELECT {_COLS} {_JOIN}
                     JOIN sesiones_monitoreo s ON s.id = r.sesion_id
-                    WHERE s.usuario_id = %s
+                    WHERE s.usuario_id = %s OR s.tipo_fuente = 'camara_ip'
                     ORDER BY r.fecha_registro DESC
                     LIMIT 100
                     """,

@@ -133,10 +133,6 @@ def detener_monitoreo(
     sesion_id: int,
     payload: dict = Depends(require_auth),
 ):
-    from detector.yolo_detector import eliminar_estado
-    from app.repositories import analisis_repo
-    import datetime
-
     sesion = monitoreo_repo.get_sesion(sesion_id)
     if not sesion:
         raise HTTPException(status_code=404, detail="Sesión de monitoreo no encontrada.")
@@ -167,40 +163,11 @@ def detener_monitoreo(
         result["mensaje"] = "Monitoreo detenido correctamente."
         return result
 
-    # Guardar resultado de análisis en BD si había estado activo (cámara IP)
-    estado = eliminar_estado(sesion_id)
-    if estado and estado.frames_procesados > 0:
-        import os
-        import logging
-        zona_id = sesion[5]  # sesion[5] = zona_exclusion_id
-
-        # RF-5.2: persistir frame con mayor concentración si existe
-        evidencia_path = None
-        if estado.frame_evidencia_bytes:
-            try:
-                os.makedirs("uploads/evidencias", exist_ok=True)
-                evidencia_path = f"uploads/evidencias/sesion_{sesion_id}.jpg"
-                with open(evidencia_path, "wb") as f:
-                    f.write(estado.frame_evidencia_bytes)
-            except Exception:
-                logging.getLogger(__name__).exception(
-                    "Error al guardar frame de evidencia (sesion_id=%s)", sesion_id
-                )
-
-        analisis_repo.save_resultado(
-            sesion_id=sesion_id,
-            zona_config_id=zona_id,
-            personas_maximas=estado.personas_maximas,
-            nivel_maximo=estado.nivel_maximo,
-            tiempo_primera_media_seg=estado.tiempo_primera_media,
-            alerta_activada=estado.alerta_activada,
-            frames_procesados=estado.frames_procesados,
-            inicio_analisis=datetime.datetime.fromtimestamp(estado.inicio).isoformat(),
-            fin_analisis=datetime.datetime.now().isoformat(),
-            frame_evidencia=evidencia_path,
-        )
-
-    sesion = monitoreo_repo.detener_sesion(sesion_id)
+    # Cámara IP: guarda el resultado en el historial y cierra la sesión. El
+    # hilo RTSP llama a lo mismo al terminar; finalizar_sesion_camara es
+    # idempotente, así que no se duplica la fila.
+    from app.core.sesion_camara import finalizar_sesion_camara
+    sesion = finalizar_sesion_camara(sesion_id, sesion[5])   # sesion[5] = zona_exclusion_id
     result = _row(sesion)
     result["mensaje"] = "Monitoreo detenido correctamente."
     return result

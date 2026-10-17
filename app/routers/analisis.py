@@ -26,6 +26,7 @@ from app.models.schemas import (
     ZonasCriticasOut,
 )
 from app.core.rtsp_manager import cancel_session as rtsp_cancel, get_session as rtsp_get, set_session as rtsp_set
+from app.core.sesion_camara import finalizar_sesion_camara
 from app.core.security import decode_token
 from app.repositories import alerta_repo, analisis_repo, camara_repo, grabacion_repo, monitoreo_repo, zona_exclusion_repo
 from detector.yolo_detector import (
@@ -259,7 +260,10 @@ def obtener_resultado(sesion_id: int, payload: dict = Depends(require_auth)):
     sesion = monitoreo_repo.get_sesion(sesion_id)
     if sesion is None:
         raise HTTPException(status_code=404, detail="Sesión no encontrada.")
-    if int(payload["sub"]) != sesion[1] and payload.get("rol") != "administrador":
+    # Las sesiones de cámara IP son del equipo (como sus alertas); las de
+    # grabación previa siguen siendo personales.
+    es_camara = sesion[2] == "camara_ip"
+    if not es_camara and int(payload["sub"]) != sesion[1] and payload.get("rol") != "administrador":
         raise HTTPException(status_code=403, detail="No tienes acceso a esta sesión.")
 
     row = analisis_repo.get_resultado_by_sesion(sesion_id)
@@ -375,6 +379,13 @@ def _rtsp_session_start(
                 break
             time.sleep(5)
         rtsp_cancel(sesion_id)  # limpia la entrada del manager cuando el hilo termina
+        # La cámara se apagó (nadie la miraba, se abrió otra sesión o se
+        # detuvo por la API): su resultado pasa al historial sin depender de
+        # que alguien pulse un botón.
+        try:
+            finalizar_sesion_camara(sesion_id, zona_id)
+        except Exception:
+            logger.exception("Error al cerrar la sesión de cámara (sesion_id=%s)", sesion_id)
 
     t = threading.Thread(target=worker, daemon=True)
     t.start()
