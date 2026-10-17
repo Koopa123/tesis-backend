@@ -237,6 +237,8 @@ class AlertaOut(BaseModel):
     camara_id: int | None = None
     camara_nombre: str | None = None
     clip_evidencia: str | None = None   # ruta al clip de video (5-8 s previos a la alerta)
+    atendida_por: int | None = None
+    atendida_por_nombre: str | None = None
 
 
 class AlertasListOut(BaseModel):

@@ -230,3 +230,6 @@ ALTER TABLE alertas ADD COLUMN IF NOT EXISTS clip_evidencia TEXT;
 -- (api/zonas-exclusion/frame/<uuid>.<ext>).
 ALTER TABLE configuraciones_zonas_exclusion ADD COLUMN IF NOT EXISTS frame_imagen BYTEA;
 ALTER TABLE configuraciones_zonas_exclusion ADD COLUMN IF NOT EXISTS frame_mime VARCHAR(50);
+
+-- 2026-10-17: las alertas de cámara son del equipo; se registra quién la atendió.
+ALTER TABLE alertas ADD COLUMN IF NOT EXISTS atendida_por INTEGER REFERENCES usuarios(id) ON DELETE SET NULL;

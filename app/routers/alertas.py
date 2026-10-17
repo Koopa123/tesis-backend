@@ -2,7 +2,7 @@
 EP-004 — Endpoints de alertas de aglomeración.
 
 GET   /api/alertas/stream       → SSE en tiempo real para el cliente conectado (RF-4.1)
-GET   /api/alertas              → historial de alertas del usuario (RF-4.5)
+GET   /api/alertas              → historial de alertas del equipo (RF-4.5)
 PATCH /api/alertas/{id}/atender → marcar una alerta como atendida (RF-4.4)
 
 El endpoint /stream mantiene una conexión HTTP persistente abierta.
@@ -35,9 +35,10 @@ _KEEPALIVE_INTERVAL = 15  # segundos
 def _row(r: tuple) -> dict:
     # Dos formas posibles según qué repo produjo la tupla (ver alerta_repo._COLS
     # vs _COLS_JOIN):
-    #   _COLS      (11 cols): id..camara_id, clip_evidencia            — crear/marcar_atendida
-    #   _COLS_JOIN (12 cols): id..camara_id, camara_nombre, clip_evidencia — list/get
-    con_join = len(r) >= 12
+    #   _COLS      (11 cols): id..camara_id, clip_evidencia            — crear
+    #   _COLS_JOIN (14 cols): id..camara_id, camara_nombre, clip_evidencia,
+    #                         atendida_por, atendida_por_nombre       — list/get/marcar_atendida
+    con_join = len(r) >= 14
     return {
         "id": r[0],
         "sesion_id": r[1],
@@ -51,6 +52,8 @@ def _row(r: tuple) -> dict:
         "camara_id": r[9] if len(r) > 9 else None,
         "camara_nombre": r[10] if con_join else None,
         "clip_evidencia": r[11] if con_join else (r[10] if len(r) > 10 else None),
+        "atendida_por": r[12] if con_join else None,
+        "atendida_por_nombre": r[13] if con_join else None,
     }
 
 
@@ -97,13 +100,10 @@ def listar_alertas(
     ),
     payload: dict = Depends(require_auth),
 ):
-    """RF-4.5: Historial de alertas. Admin ve todas; vigilante solo las propias."""
-    es_admin = payload.get("rol") == "administrador"
-    usuario_id = int(payload["sub"])
-    rows = alerta_repo.list_alertas(
-        usuario_id=None if es_admin else usuario_id,
-        atendida=atendida,
-    )
+    """RF-4.5: Historial de alertas. Todas vienen de cámaras (IP compartidas o
+    edge) y las atiende el equipo de seguridad, así que todos los usuarios
+    autenticados ven todas; las grabaciones previas no generan alertas."""
+    rows = alerta_repo.list_alertas(usuario_id=None, atendida=atendida)
     return {"alertas": [_row(r) for r in rows]}
 
 
@@ -111,16 +111,13 @@ def listar_alertas(
 
 @router.patch("/{alerta_id}/atender", response_model=AlertaOut)
 def atender_alerta(alerta_id: int, payload: dict = Depends(require_auth)):
-    """RF-4.4: Marcar una alerta como atendida."""
+    """RF-4.4: Marcar una alerta como atendida. Cualquier usuario del equipo
+    puede hacerlo; queda registrado quién la atendió."""
     row = alerta_repo.get_alerta(alerta_id)
     if row is None:
         raise HTTPException(status_code=404, detail="Alerta no encontrada.")
 
-    es_admin = payload.get("rol") == "administrador"
-    if not es_admin and row[2] != int(payload["sub"]):   # row[2] = usuario_id
-        raise HTTPException(status_code=403, detail="No tienes acceso a esta alerta.")
-
-    updated = alerta_repo.marcar_atendida(alerta_id)
+    updated = alerta_repo.marcar_atendida(alerta_id, int(payload["sub"]))
     if updated is None:
         raise HTTPException(status_code=500, detail="No se pudo actualizar la alerta.")
     return _row(updated)

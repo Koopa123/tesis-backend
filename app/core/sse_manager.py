@@ -71,5 +71,15 @@ class _AlertaSSEManager:
             self.publish(usuario_id, data), loop
         ).result(timeout=5)
 
+    def broadcast_from_thread(
+        self,
+        data: dict,
+        loop: asyncio.AbstractEventLoop,
+    ) -> None:
+        """Como broadcast(), pero llamado desde un hilo (procesamiento de video)."""
+        asyncio.run_coroutine_threadsafe(
+            self.broadcast(data), loop
+        ).result(timeout=5)
+
 
 alerta_manager = _AlertaSSEManager()

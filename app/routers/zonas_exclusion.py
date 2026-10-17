@@ -5,7 +5,7 @@ import uuid
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Response, UploadFile
 from pydantic import ValidationError
 
-from app.core.security import require_admin
+from app.core.security import require_admin, require_auth
 from app.models.schemas import ZonaExclusionOut, ZonaRect, ZonasExclusionListOut
 from app.repositories import zona_exclusion_repo
 
@@ -111,7 +111,9 @@ async def crear_zona(
 
 
 @router.get("", response_model=ZonasExclusionListOut)
-def listar_zonas(payload: dict = Depends(require_admin)):
+def listar_zonas(payload: dict = Depends(require_auth)):
+    # Lectura abierta a todo usuario autenticado: el vigilante elige una zona
+    # para su análisis en Monitoreo. Crear, editar y borrar sigue siendo de admin.
     rows = zona_exclusion_repo.list_zonas()
     return {"configuraciones": [_row(r) for r in rows]}
 
@@ -133,7 +135,7 @@ def obtener_frame(nombre: str):
 
 
 @router.get("/{zona_id}", response_model=ZonaExclusionOut)
-def obtener_zona(zona_id: int, payload: dict = Depends(require_admin)):
+def obtener_zona(zona_id: int, payload: dict = Depends(require_auth)):
     row = zona_exclusion_repo.get_zona(zona_id)
     if row is None or not row[9]:   # row[9] = activa
         raise HTTPException(status_code=404, detail="Configuración no encontrada.")

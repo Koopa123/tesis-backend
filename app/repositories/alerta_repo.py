@@ -11,7 +11,12 @@ _COLS = (
 _COLS_JOIN = (
     "a.id, a.sesion_id, a.usuario_id, a.zona_config_id, a.nivel, a.personas, "
     "a.atendida, a.fecha_alerta, a.fecha_atencion, a.camara_id, c.nombre, "
-    "a.clip_evidencia"
+    "a.clip_evidencia, a.atendida_por, u.nombre"
+)
+
+_JOINS = (
+    "LEFT JOIN camaras_ip c ON c.id = a.camara_id "
+    "LEFT JOIN usuarios u ON u.id = a.atendida_por"
 )
 
 
@@ -43,7 +48,7 @@ def get_alerta(alerta_id: int) -> tuple | None:
             cur.execute(
                 f"""
                 SELECT {_COLS_JOIN} FROM alertas a
-                LEFT JOIN camaras_ip c ON c.id = a.camara_id
+                {_JOINS}
                 WHERE a.id = %s
                 """,
                 (alerta_id,),
@@ -51,20 +56,22 @@ def get_alerta(alerta_id: int) -> tuple | None:
             return cur.fetchone()
 
 
-def marcar_atendida(alerta_id: int) -> tuple | None:
+def marcar_atendida(alerta_id: int, usuario_id: int) -> tuple | None:
+    """Marca la alerta como atendida por usuario_id. Si ya estaba atendida,
+    conserva quién y cuándo la atendió primero. Devuelve la fila con JOIN."""
     with get_db() as conn:
         with conn.cursor() as cur:
             cur.execute(
-                f"""
+                """
                 UPDATE alertas
                 SET atendida = TRUE,
-                    fecha_atencion = NOW()
+                    fecha_atencion = COALESCE(fecha_atencion, NOW()),
+                    atendida_por = COALESCE(atendida_por, %s)
                 WHERE id = %s
-                RETURNING {_COLS}
                 """,
-                (alerta_id,),
+                (usuario_id, alerta_id),
             )
-            return cur.fetchone()
+    return get_alerta(alerta_id)
 
 
 def actualizar_clip(alerta_id: int, ruta: str) -> None:
@@ -83,7 +90,7 @@ def list_alertas(
     atendida: bool | None = None,
     limit: int = 100,
 ) -> list[tuple]:
-    """Admin ve todas; vigilante solo las propias. Filtrables por estado atendida."""
+    """usuario_id=None devuelve las de todos (lo normal: las alertas son del equipo). Filtrables por estado atendida."""
     conditions: list[str] = []
     params: list = []
 
@@ -102,7 +109,7 @@ def list_alertas(
             cur.execute(
                 f"""
                 SELECT {_COLS_JOIN} FROM alertas a
-                LEFT JOIN camaras_ip c ON c.id = a.camara_id
+                {_JOINS}
                 {where}
                 ORDER BY a.fecha_alerta DESC
                 LIMIT %s

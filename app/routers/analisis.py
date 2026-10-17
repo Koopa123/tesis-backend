@@ -277,6 +277,8 @@ def _rtsp_session_start(
     usuario_id: int,
     zona_id: int | None,
     loop: asyncio.AbstractEventLoop,
+    camara_id: int | None = None,
+    camara_nombre: str | None = None,
 ) -> dict:
     """Lanza el hilo RTSP y registra el estado compartido para la sesión."""
     cancelado = threading.Event()
@@ -313,11 +315,17 @@ def _rtsp_session_start(
                     zona_config_id=zona_id,
                     nivel="alto",
                     personas=resultado.get("personas", 0),
+                    camara_id=camara_id,
                 )
-                alerta_manager.publish_from_thread(usuario_id, {
+                # La cámara IP es compartida: la alerta es del equipo de
+                # seguridad, no solo de quien abrió la sesión, así que se avisa
+                # a todos los usuarios conectados (igual que las del edge).
+                alerta_manager.broadcast_from_thread({
                     "tipo": "alerta",
                     "id": db_alerta[0],
                     "sesion_id": sesion_id,
+                    "camara_id": camara_id,
+                    "camara_nombre": camara_nombre,
                     "nivel": "alto",
                     "personas": resultado.get("personas", 0),
                     "fecha_alerta": db_alerta[7].isoformat() if db_alerta[7] else None,
@@ -427,7 +435,10 @@ async def stream_camara_mjpeg(
     session_data = rtsp_get(sesion_id)
     if session_data is None or session_data["cancelado"].is_set():
         rtsp_url = _build_rtsp_url(camara)
-        session_data = _rtsp_session_start(sesion_id, rtsp_url, config, usuario_id, zona_id, loop)
+        session_data = _rtsp_session_start(
+            sesion_id, rtsp_url, config, usuario_id, zona_id, loop,
+            camara_id=camara[0], camara_nombre=camara[1],
+        )
 
     BOUNDARY = b"frame"
 
@@ -505,7 +516,10 @@ async def stream_camara_stats(
     session_data = rtsp_get(sesion_id)
     if session_data is None or session_data["cancelado"].is_set():
         rtsp_url = _build_rtsp_url(camara)
-        session_data = _rtsp_session_start(sesion_id, rtsp_url, config, usuario_id, zona_id, loop)
+        session_data = _rtsp_session_start(
+            sesion_id, rtsp_url, config, usuario_id, zona_id, loop,
+            camara_id=camara[0], camara_nombre=camara[1],
+        )
 
     ultimo_resultado = None
     keepalive_counter = 0
