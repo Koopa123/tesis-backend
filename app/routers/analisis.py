@@ -270,6 +270,11 @@ def obtener_resultado(sesion_id: int, payload: dict = Depends(require_auth)):
 
 # ── Helpers de sesiones RTSP ─────────────────────────────────────────────────
 
+# Segundos que el hilo RTSP sigue vivo después de que se va el último
+# espectador del MJPEG (ver mjpeg_generate).
+_GRACIA_SIN_ESPECTADORES = 120
+
+
 def _rtsp_session_start(
     sesion_id: int,
     rtsp_url: str,
@@ -468,11 +473,27 @@ async def stream_camara_mjpeg(
             # RTSP para todos los demás, que se quedaban con la imagen
             # congelada. Además permitía saltarse el 403 de "detener sesión
             # ajena" con solo cerrar el navegador.
+            #
+            # Y ni siquiera entonces se corta de inmediato: se espera
+            # _GRACIA_SIN_ESPECTADORES por si el usuario solo cambió de vista
+            # (p. ej. Multi-cámara → Historial → Multi-cámara). Reabrir RTSP
+            # cuesta varios segundos, y algunas cámaras tardan hasta 30 s en
+            # soltar la conexión anterior.
             with session_data["lock"]:
                 session_data["espectadores"] = max(0, session_data.get("espectadores", 1) - 1)
                 ultimo = session_data["espectadores"] == 0
             if ultimo:
-                session_data["cancelado"].set()
+                def _cancelar_si_sigue_sin_espectadores():
+                    with session_data["lock"]:
+                        sin_nadie = session_data.get("espectadores", 0) == 0
+                    if sin_nadie:
+                        session_data["cancelado"].set()
+                try:
+                    asyncio.get_running_loop().call_later(
+                        _GRACIA_SIN_ESPECTADORES, _cancelar_si_sigue_sin_espectadores
+                    )
+                except RuntimeError:
+                    session_data["cancelado"].set()
 
     return StreamingResponse(
         mjpeg_generate(),

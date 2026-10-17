@@ -70,6 +70,19 @@ def iniciar_monitoreo(
                 rtsp_cancel(vieja[0])  # vieja[0] = id
                 monitoreo_repo.detener_sesion(vieja[0])
 
+        # Si la cámara ya tiene una sesión viva (su hilo RTSP sigue corriendo,
+        # p. ej. dentro del período de gracia tras salir de Multi-cámara) y
+        # con la misma zona, se reutiliza: reabrir RTSP cuesta varios
+        # segundos y algunas cámaras tardan hasta 30 s en soltar la conexión.
+        from app.core.rtsp_manager import get_session as rtsp_get_session
+        viva = monitoreo_repo.get_cualquier_sesion_activa_por_camara(data.camara_id)
+        if viva is not None and viva[5] == zona_exclusion_id:   # viva[5] = zona_exclusion_id
+            hilo = rtsp_get_session(viva[0])
+            if hilo is not None and not hilo["cancelado"].is_set():
+                result = _row(viva)
+                result["mensaje"] = _MENSAJES[data.tipo_fuente]
+                return result
+
         _cerrar_sesiones_previas()
 
     if data.tipo_fuente == "grabacion_previa" and data.grabacion_id:
