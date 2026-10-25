@@ -6,6 +6,7 @@ from collections import defaultdict, deque
 from fastapi import APIRouter, Depends, HTTPException, Request
 from psycopg2.errors import UniqueViolation
 
+from app.core.auditoria import auditar
 from app.core.security import create_token, hash_password, require_auth, verify_password
 from app.models.schemas import AuthResponse, LoginRequest, RegisterRequest, UserOut
 from app.repositories import user_repo
@@ -83,6 +84,7 @@ def login(data: LoginRequest, request: Request):
     """
     claves = _claves_login(request, data.email)
     if _bloqueado(claves):
+        auditar(request, None, "login_bloqueado")
         raise HTTPException(
             status_code=429,
             detail="Demasiados intentos fallidos. Espera un minuto e inténtalo de nuevo.",
@@ -93,10 +95,14 @@ def login(data: LoginRequest, request: Request):
     # Mismo mensaje para email inexistente, contraseña incorrecta o cuenta sin activar
     if not usuario or not verify_password(data.password, usuario[3]):
         _registrar_fallido(claves)
+        # Se guarda la cuenta si existe, no el correo escrito: un correo mal
+        # tipeado también es un dato personal y no aporta a la auditoría.
+        auditar(request, usuario[0] if usuario else None, "login_fallido")
         raise HTTPException(status_code=401, detail="Email o contraseña incorrectos")
 
     user_id, nombre, email, _hash, rol = usuario
     token = create_token(user_id, email, rol)
+    auditar(request, user_id, "login_exitoso")
     return {
         "token": token,
         "usuario": {"id": user_id, "nombre": nombre, "email": email, "rol": rol},

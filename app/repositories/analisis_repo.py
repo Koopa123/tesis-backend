@@ -91,6 +91,43 @@ def list_resultados(usuario_id: int | None = None) -> list[tuple]:
             return cur.fetchall()
 
 
+def get_evidencia(resultado_id: int) -> tuple | None:
+    """(frame_evidencia, tipo_fuente, usuario_id de la sesión) para decidir quién puede ver la foto."""
+    with get_db() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT r.frame_evidencia, s.tipo_fuente, s.usuario_id
+                FROM resultados_analisis r
+                LEFT JOIN sesiones_monitoreo s ON s.id = r.sesion_id
+                WHERE r.id = %s
+                """,
+                (resultado_id,),
+            )
+            return cur.fetchone()
+
+
+def list_evidencias_vencidas(dias: int) -> list[tuple]:
+    """(id, frame_evidencia) de resultados con foto más antigua que `dias`."""
+    with get_db() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT id, frame_evidencia FROM resultados_analisis
+                WHERE frame_evidencia IS NOT NULL
+                  AND fecha_registro < NOW() - make_interval(days => %s)
+                """,
+                (dias,),
+            )
+            return cur.fetchall()
+
+
+def quitar_evidencia(resultado_id: int) -> None:
+    with get_db() as conn:
+        with conn.cursor() as cur:
+            cur.execute("UPDATE resultados_analisis SET frame_evidencia = NULL WHERE id = %s", (resultado_id,))
+
+
 def delete_resultado(resultado_id: int) -> tuple | None:
     with get_db() as conn:
         with conn.cursor() as cur:

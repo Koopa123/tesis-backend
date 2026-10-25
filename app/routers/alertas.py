@@ -19,9 +19,10 @@ Keepalive cada 15 s (previene cierres por proxies/load balancers):
 import asyncio
 import json
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import StreamingResponse
 
+from app.core.auditoria import auditar
 from app.core.security import require_auth
 from app.core.sse_manager import alerta_manager
 from app.models.schemas import AlertaOut, AlertasListOut
@@ -39,6 +40,7 @@ def _row(r: tuple) -> dict:
     #   _COLS_JOIN (14 cols): id..camara_id, camara_nombre, clip_evidencia,
     #                         atendida_por, atendida_por_nombre       — list/get/marcar_atendida
     con_join = len(r) >= 14
+    clip = r[11] if con_join else (r[10] if len(r) > 10 else None)
     return {
         "id": r[0],
         "sesion_id": r[1],
@@ -51,7 +53,8 @@ def _row(r: tuple) -> dict:
         "fecha_atencion": r[8].isoformat() if r[8] else None,
         "camara_id": r[9] if len(r) > 9 else None,
         "camara_nombre": r[10] if con_join else None,
-        "clip_evidencia": r[11] if con_join else (r[10] if len(r) > 10 else None),
+        # Ruta del endpoint con sesión, no la del archivo (ver app/routers/media.py)
+        "clip_evidencia": f"api/media/evidencia/alerta/{r[0]}" if clip else None,
         "atendida_por": r[12] if con_join else None,
         "atendida_por_nombre": r[13] if con_join else None,
     }
@@ -110,7 +113,7 @@ def listar_alertas(
 # ── PATCH /{alerta_id}/atender ────────────────────────────────────────────────
 
 @router.patch("/{alerta_id}/atender", response_model=AlertaOut)
-def atender_alerta(alerta_id: int, payload: dict = Depends(require_auth)):
+def atender_alerta(alerta_id: int, request: Request, payload: dict = Depends(require_auth)):
     """RF-4.4: Marcar una alerta como atendida. Cualquier usuario del equipo
     puede hacerlo; queda registrado quién la atendió."""
     row = alerta_repo.get_alerta(alerta_id)
@@ -120,4 +123,5 @@ def atender_alerta(alerta_id: int, payload: dict = Depends(require_auth)):
     updated = alerta_repo.marcar_atendida(alerta_id, int(payload["sub"]))
     if updated is None:
         raise HTTPException(status_code=500, detail="No se pudo actualizar la alerta.")
+    auditar(request, payload, "atender_alerta", "alerta", alerta_id)
     return _row(updated)

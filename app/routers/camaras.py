@@ -1,4 +1,6 @@
-from fastapi import APIRouter, Depends, HTTPException, Response
+from fastapi import APIRouter, Depends, HTTPException, Request, Response
+
+from app.core.auditoria import auditar
 
 from app.core.security import require_admin, require_auth
 from app.models.schemas import CamaraCreate, CamaraEstadoUpdate, CamaraOut, CamaraUpdate, CamaraZonaUpdate
@@ -33,7 +35,8 @@ def _row(c: tuple) -> dict:
 @router.post("", response_model=CamaraOut, status_code=201)
 def registrar_camara(
     data: CamaraCreate,
-    _: dict = Depends(require_admin),
+    request: Request,
+    payload: dict = Depends(require_admin),
 ):
     """Registra una cámara IP con credenciales RTSP."""
     if data.zona_exclusion_id is not None and not zona_exclusion_repo.get_zona(data.zona_exclusion_id):
@@ -51,6 +54,7 @@ def registrar_camara(
         rtsp_subtipo=data.rtsp_subtipo,
         zona_exclusion_id=data.zona_exclusion_id,
     )
+    auditar(request, payload, "crear_camara", "camara", camara[0], camara[1])
     return _row(camara)
 
 
@@ -64,7 +68,8 @@ def listar_camaras(_: dict = Depends(require_auth)):
 def actualizar_camara(
     camara_id: int,
     data: CamaraUpdate,
-    _: dict = Depends(require_admin),
+    request: Request,
+    payload: dict = Depends(require_admin),
 ):
     """
     Edita los datos/RTSP de una cámara ya registrada — ej. cuando el router
@@ -85,6 +90,8 @@ def actualizar_camara(
         rtsp_canal=data.rtsp_canal,
         rtsp_subtipo=data.rtsp_subtipo,
     )
+    cambio_pw = " (cambió la contraseña RTSP)" if data.rtsp_password is not None else ""
+    auditar(request, payload, "editar_camara", "camara", camara_id, f"{camara[1]}{cambio_pw}")
     return _row(camara)
 
 
@@ -92,12 +99,14 @@ def actualizar_camara(
 def actualizar_estado(
     camara_id: int,
     data: CamaraEstadoUpdate,
-    _: dict = Depends(require_admin),
+    request: Request,
+    payload: dict = Depends(require_admin),
 ):
     """Activa o desactiva una cámara. Solo administrador."""
     camara = camara_repo.update_estado(camara_id, data.activa)
     if not camara:
         raise HTTPException(status_code=404, detail="Cámara no encontrada")
+    auditar(request, payload, "activar_camara" if data.activa else "desactivar_camara", "camara", camara_id, camara[1])
     return _row(camara)
 
 
@@ -105,7 +114,8 @@ def actualizar_estado(
 def actualizar_zona(
     camara_id: int,
     data: CamaraZonaUpdate,
-    _: dict = Depends(require_admin),
+    request: Request,
+    payload: dict = Depends(require_admin),
 ):
     """
     Asigna (o quita) la zona de exclusión por defecto de una cámara.
@@ -117,13 +127,15 @@ def actualizar_zona(
     if data.zona_exclusion_id is not None and not zona_exclusion_repo.get_zona(data.zona_exclusion_id):
         raise HTTPException(status_code=404, detail="Zona de exclusión no encontrada.")
     camara = camara_repo.update_zona(camara_id, data.zona_exclusion_id)
+    auditar(request, payload, "zona_camara", "camara", camara_id, f"zona {data.zona_exclusion_id}")
     return _row(camara)
 
 
 @router.get("/{camara_id}/foto")
 def tomar_foto(
     camara_id: int,
-    _: dict = Depends(require_admin),
+    request: Request,
+    payload: dict = Depends(require_admin),
 ):
     """
     Toma un fotograma en vivo de la cámara, sin detecciones dibujadas, para
@@ -144,15 +156,19 @@ def tomar_foto(
                 "nube no se puede llegar a las cámaras del local)."
             ),
         )
+    auditar(request, payload, "foto_camara", "camara", camara_id, camara[1])
     return Response(content=jpeg, media_type="image/jpeg", headers={"Cache-Control": "no-store"})
 
 
 @router.delete("/{camara_id}", status_code=204)
 def eliminar_camara(
     camara_id: int,
-    _: dict = Depends(require_admin),
+    request: Request,
+    payload: dict = Depends(require_admin),
 ):
     """Elimina una cámara registrada. Solo administrador."""
-    if not camara_repo.get_camara(camara_id):
+    camara = camara_repo.get_camara(camara_id)
+    if not camara:
         raise HTTPException(status_code=404, detail="Cámara no encontrada")
     camara_repo.delete_camara(camara_id)
+    auditar(request, payload, "eliminar_camara", "camara", camara_id, camara[1])

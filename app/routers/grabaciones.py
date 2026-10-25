@@ -9,7 +9,8 @@ from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Reques
 from fastapi.responses import FileResponse, StreamingResponse
 
 from app.config import Settings, get_settings
-from app.core.security import decode_token, require_auth
+from app.core.auditoria import auditar, auditar_vista
+from app.core.security import decode_media_ticket, require_auth
 from app.models.schemas import GrabacionOut, GrabacionesListOut
 from app.repositories import grabacion_repo
 
@@ -37,6 +38,7 @@ def _row(g: tuple) -> dict:
 
 @router.post("", response_model=GrabacionOut, status_code=201)
 async def cargar_grabacion(
+    request: Request,
     file: UploadFile = File(...),
     fecha_grabacion: str | None = Form(None, description="ISO 8601: 2025-06-15T14:30"),
     payload: dict = Depends(require_auth),
@@ -68,6 +70,7 @@ async def cargar_grabacion(
         usuario_id=int(payload["sub"]),
         fecha_grabacion=fecha_grabacion or None,
     )
+    auditar(request, payload, "subir_grabacion", "grabacion", grabacion[0], grabacion[1])
     return _row(grabacion)
 
 
@@ -75,26 +78,24 @@ async def cargar_grabacion(
 def servir_grabacion(
     grabacion_id: int,
     request: Request,
-    token: str = Query(..., description="JWT Bearer token como query param"),
+    ticket: str = Query(..., description="Ticket de POST /api/media/ticket (<video> no envía headers)"),
 ):
     """
     Sirve el archivo de video para reproducción en el navegador.
-    Acepta el token como query param porque <video> no soporta headers personalizados.
+    El <video> no puede mandar el header Authorization, así que la URL lleva un
+    ticket que vale solo para esta grabación y por 30 minutos, no el JWT de sesión.
     Soporta HTTP Range requests (206 Partial Content) para permitir streaming
     progresivo y seek sin descargar el archivo completo primero — Starlette's
     FileResponse no implementa Range en la versión instalada.
     """
-    try:
-        payload = decode_token(token)
-    except HTTPException:
-        raise HTTPException(status_code=401, detail="Token inválido.")
+    claims = decode_media_ticket(ticket, "grabacion", grabacion_id)
 
     grabacion = grabacion_repo.get_grabacion(grabacion_id)
     if grabacion is None:
         raise HTTPException(status_code=404, detail="Grabación no encontrada.")
 
-    usuario_id = int(payload["sub"])
-    rol = payload.get("rol", "")
+    usuario_id = int(claims["sub"])
+    rol = claims.get("rol", "")
     if grabacion[5] != usuario_id and rol != "administrador":
         raise HTTPException(status_code=403, detail="Sin acceso a esta grabación.")
 
@@ -107,6 +108,9 @@ def servir_grabacion(
     file_size = os.path.getsize(ruta)
 
     range_header = request.headers.get("range")
+    # El <video> pide el archivo en varios tramos: se audita solo el primero.
+    if range_header is None or range_header.strip().startswith("bytes=0-"):
+        auditar_vista(request, claims, "ver_grabacion", "grabacion", grabacion_id)
     if range_header is None:
         return FileResponse(
             ruta,
@@ -162,6 +166,7 @@ def servir_grabacion(
 @router.delete("/{grabacion_id}", status_code=204)
 def eliminar_grabacion(
     grabacion_id: int,
+    request: Request,
     payload: dict = Depends(require_auth),
 ):
     """
@@ -201,6 +206,7 @@ def eliminar_grabacion(
         )
 
     grabacion_repo.delete_grabacion(grabacion_id)
+    auditar(request, payload, "eliminar_grabacion", "grabacion", grabacion_id, grabacion[1])
 
 
 @router.get("", response_model=GrabacionesListOut)

@@ -10,6 +10,7 @@ Responsabilidades:
 """
 
 import json
+import os
 import time
 from collections import deque
 from threading import Lock
@@ -535,21 +536,27 @@ def _dibujar_frame_cv2(
     return frame
 
 
-def escribir_clip(frames: list[tuple[float, bytes]], ruta_salida: str) -> bool:
+def escribir_clip(frames: list[tuple[float, bytes]], ruta_salida: str) -> str | None:
     """
-    Arma un archivo .mp4 corto a partir de fotogramas JPEG ya bufferizados en
-    RAM (evidencia de alerta). Decodificar ~100-200 JPEGs y escribir el video
-    toma cientos de milisegundos — SIEMPRE debe llamarse desde un hilo aparte
-    (ver analisis._guardar_clip_alerta), nunca desde el hilo de detección en
-    vivo. No usa _inference_lock ni el modelo, así que no compite por la GPU/CPU
-    que necesita la detección de otras cámaras.
+    Arma un video corto a partir de fotogramas JPEG ya bufferizados en RAM
+    (evidencia de alerta) y devuelve la ruta escrita, o None si no se pudo.
+    Decodificar ~100-200 JPEGs y escribir el video toma cientos de milisegundos
+    — SIEMPRE debe llamarse desde un hilo aparte (ver
+    analisis._guardar_clip_alerta), nunca desde el hilo de detección en vivo.
+    No usa _inference_lock ni el modelo, así que no compite por la GPU/CPU que
+    necesita la detección de otras cámaras.
+
+    Antes se grababa con el códec "mp4v" (MPEG-4 Parte 2), que Chrome y Edge no
+    reproducen: el botón "Ver clip" mostraba un reproductor vacío. Ahora se
+    intenta H.264 en .mp4 y, si el equipo no tiene ese codificador, VP8 en .webm;
+    los dos se reproducen en el navegador.
     """
     if not frames:
-        return False
+        return None
 
     primer_frame = cv2.imdecode(np.frombuffer(frames[0][1], np.uint8), cv2.IMREAD_COLOR)
     if primer_frame is None:
-        return False
+        return None
     h, w = primer_frame.shape[:2]
 
     # fps real a partir del intervalo de tiempo cubierto por el buffer, para que
@@ -558,10 +565,17 @@ def escribir_clip(frames: list[tuple[float, bytes]], ruta_salida: str) -> bool:
     fps = len(frames) / duracion if duracion > 0.5 else 10.0
     fps = max(4.0, min(fps, 25.0))
 
-    fourcc = cv2.VideoWriter_fourcc(*"mp4v")
-    writer = cv2.VideoWriter(ruta_salida, fourcc, fps, (w, h))
-    if not writer.isOpened():
-        return False
+    base = os.path.splitext(ruta_salida)[0]
+    writer = ruta = None
+    for codigo, ext in (("avc1", ".mp4"), ("VP80", ".webm")):
+        ruta = base + ext
+        writer = cv2.VideoWriter(ruta, cv2.VideoWriter_fourcc(*codigo), fps, (w, h))
+        if writer.isOpened():
+            break
+        writer.release()
+        writer = None
+    if writer is None:
+        return None
 
     try:
         for _, jpeg_bytes in frames:
@@ -570,7 +584,7 @@ def escribir_clip(frames: list[tuple[float, bytes]], ruta_salida: str) -> bool:
                 writer.write(frame)
     finally:
         writer.release()
-    return True
+    return ruta
 
 
 # ── Foto de una cámara RTSP (frame de referencia para zonas) ────────────────

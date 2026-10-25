@@ -4,13 +4,15 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.staticfiles import StaticFiles
 
 from app.config import get_settings
-from app.core import singleton_lock
+from app.core import retencion, singleton_lock
 from app.core.rtsp_manager import cancel_all_sessions
 from app.database import close_pool, init_pool
-from app.routers import alertas, analisis, auth, camaras, edge, fuentes_video, grabaciones, monitoreo, usuarios, zonas_exclusion
+from app.routers import (
+    alertas, analisis, auditoria, auth, camaras, edge, fuentes_video, grabaciones, media, monitoreo, usuarios,
+    zonas_exclusion,
+)
 
 logging.basicConfig(
     level=logging.INFO,
@@ -62,6 +64,7 @@ async def lifespan(app: FastAPI):
         # detección real). Si falla, no debe tumbar el arranque de toda la app.
         logger.exception("No se pudo precargar el modelo YOLO en el warmup")
 
+    retencion.iniciar()
     logger.info("App lista ✓")
 
     yield  # ← la app corre aquí
@@ -71,6 +74,7 @@ async def lifespan(app: FastAPI):
     # de BD: si siguen corriendo, pueden quedar usando una conexión justo
     # cuando closeall() la cierra, dejando el apagado colgado indefinidamente.
     cancel_all_sessions()
+    retencion.detener()
     close_pool()
     singleton_lock.release()
     logger.info("App apagada ✓")
@@ -104,10 +108,12 @@ app.include_router(analisis.router)
 app.include_router(alertas.router)
 app.include_router(edge.router)
 app.include_router(usuarios.router)
+app.include_router(media.router)
+app.include_router(auditoria.router)
 
-
-os.makedirs("uploads", exist_ok=True)
-app.mount("/uploads", StaticFiles(directory="uploads"), name="uploads")
+# Ya no se monta /uploads como carpeta pública: las fotos y los clips se sirven
+# por /api/media/evidencia/* con sesión, y las grabaciones por
+# /api/grabaciones/{id}/file con ticket (ver app/routers/media.py).
 
 
 @app.get("/", tags=["Estado"])

@@ -233,3 +233,24 @@ ALTER TABLE configuraciones_zonas_exclusion ADD COLUMN IF NOT EXISTS frame_mime 
 
 -- 2026-10-17: las alertas de cámara son del equipo; se registra quién la atendió.
 ALTER TABLE alertas ADD COLUMN IF NOT EXISTS atendida_por INTEGER REFERENCES usuarios(id) ON DELETE SET NULL;
+
+-- 2026-10-25: prevención de pérdida de datos (DLP).
+-- Las contraseñas RTSP se guardan cifradas con Fernet ("fernet:" + token), que
+-- no entra en VARCHAR(100). Ver app/core/cifrado.py y scripts/cifrar_rtsp_passwords.py.
+ALTER TABLE camaras_ip ALTER COLUMN rtsp_password TYPE TEXT;
+
+-- Registro de auditoría: quién vio o descargó evidencias y quién cambió cuentas,
+-- cámaras o zonas (ver app/core/auditoria.py).
+CREATE TABLE IF NOT EXISTS auditoria (
+    id          SERIAL PRIMARY KEY,
+    fecha       TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
+    usuario_id  INTEGER REFERENCES usuarios(id) ON DELETE SET NULL,
+    accion      VARCHAR(40) NOT NULL,
+    recurso     VARCHAR(40),
+    recurso_id  INTEGER,
+    detalle     TEXT,
+    ip          VARCHAR(45)
+);
+CREATE INDEX IF NOT EXISTS idx_auditoria_fecha   ON auditoria (fecha DESC);
+CREATE INDEX IF NOT EXISTS idx_auditoria_usuario ON auditoria (usuario_id);
+CREATE INDEX IF NOT EXISTS idx_auditoria_accion  ON auditoria (accion);

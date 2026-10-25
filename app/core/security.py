@@ -39,9 +39,48 @@ def decode_token(token: str, settings: Settings = None) -> dict:
     if settings is None:
         settings = get_settings()
     try:
-        return jwt.decode(token, settings.jwt_secret, algorithms=[settings.jwt_algorithm])
+        payload = jwt.decode(token, settings.jwt_secret, algorithms=[settings.jwt_algorithm])
     except JWTError:
         raise HTTPException(status_code=401, detail="Token inválido o expirado")
+    # Un ticket de medios solo abre el video para el que se emitió: no sirve
+    # como token de sesión para el resto de la API.
+    if payload.get("typ") == "media":
+        raise HTTPException(status_code=401, detail="Token inválido o expirado")
+    return payload
+
+
+# ── Tickets de medios ────────────────────────────────────────────────────────
+# <img> y <video> no pueden enviar el header Authorization, así que antes se
+# ponía el JWT de sesión (24 h, válido para toda la API) en la URL, donde queda
+# en el historial del navegador y en los registros del servidor. Ahora la URL
+# lleva un ticket que vale para UN recurso y por poco tiempo.
+
+def create_media_ticket(payload: dict, recurso: str, recurso_id: int, segundos: int,
+                        settings: Settings = None) -> str:
+    if settings is None:
+        settings = get_settings()
+    claims = {
+        "sub": payload["sub"],
+        "rol": payload.get("rol"),
+        "typ": "media",
+        "rec": recurso,
+        "rid": recurso_id,
+        "exp": datetime.now(tz=timezone.utc) + timedelta(seconds=segundos),
+    }
+    return jwt.encode(claims, settings.jwt_secret, algorithm=settings.jwt_algorithm)
+
+
+def decode_media_ticket(ticket: str, recurso: str, recurso_id: int, settings: Settings = None) -> dict:
+    """Valida el ticket y que sea para este recurso; devuelve sus claims (sub, rol)."""
+    if settings is None:
+        settings = get_settings()
+    try:
+        claims = jwt.decode(ticket, settings.jwt_secret, algorithms=[settings.jwt_algorithm])
+    except JWTError:
+        raise HTTPException(status_code=401, detail="Ticket inválido o expirado")
+    if claims.get("typ") != "media" or claims.get("rec") != recurso or claims.get("rid") != recurso_id:
+        raise HTTPException(status_code=401, detail="Ticket inválido o expirado")
+    return claims
 
 
 # ── Dependencies de FastAPI ──────────────────────────────────────────────────

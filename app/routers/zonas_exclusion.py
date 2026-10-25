@@ -2,9 +2,10 @@ import json
 import os
 import uuid
 
-from fastapi import APIRouter, Depends, File, Form, HTTPException, Response, UploadFile
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, Response, UploadFile
 from pydantic import ValidationError
 
+from app.core.auditoria import auditar
 from app.core.security import require_admin, require_auth
 from app.models.schemas import ZonaExclusionOut, ZonaRect, ZonasExclusionListOut
 from app.repositories import zona_exclusion_repo
@@ -79,6 +80,7 @@ def _leer_frame(file: UploadFile) -> tuple[str, bytes, str]:
 
 @router.post("", response_model=ZonaExclusionOut, status_code=201)
 async def crear_zona(
+    request: Request,
     nombre: str = Form(..., min_length=1, max_length=120),
     frame: UploadFile = File(...),
     zonas: str = Form(..., description="Lista JSON de rectángulos normalizados"),
@@ -107,6 +109,7 @@ async def crear_zona(
         ventana_segundos=ventana_segundos,
         cooldown_segundos=cooldown_segundos,
     )
+    auditar(request, payload, "crear_zona", "zona", row[0], nombre.strip())
     return _row(row)
 
 
@@ -145,6 +148,7 @@ def obtener_zona(zona_id: int, payload: dict = Depends(require_auth)):
 @router.put("/{zona_id}", response_model=ZonaExclusionOut)
 async def actualizar_zona(
     zona_id: int,
+    request: Request,
     nombre: str | None = Form(None),
     frame: UploadFile | None = File(None),
     zonas: str | None = Form(None),
@@ -183,13 +187,15 @@ async def actualizar_zona(
         ventana_segundos=ventana_segundos,
         cooldown_segundos=cooldown_segundos,
     )
+    auditar(request, payload, "editar_zona", "zona", zona_id, existing[1])
     return _row(row)
 
 
 @router.delete("/{zona_id}")
-def eliminar_zona(zona_id: int, payload: dict = Depends(require_admin)):
+def eliminar_zona(zona_id: int, request: Request, payload: dict = Depends(require_admin)):
     existing = zona_exclusion_repo.get_zona(zona_id)
     if existing is None or not existing[9]:
         raise HTTPException(status_code=404, detail="Configuración no encontrada.")
     zona_exclusion_repo.delete_zona(zona_id)
+    auditar(request, payload, "eliminar_zona", "zona", zona_id, existing[1])
     return {"message": "Configuración de zonas eliminada correctamente."}

@@ -1,3 +1,4 @@
+from app.core.cifrado import cifrar
 from app.database import get_db
 
 _COLS = (
@@ -34,7 +35,7 @@ def create_camara(
                 RETURNING {_COLS}
                 """,
                 (nombre, direccion_ip, ubicacion, descripcion, activa,
-                 rtsp_usuario, rtsp_password, rtsp_puerto, rtsp_canal, rtsp_subtipo,
+                 rtsp_usuario, cifrar(rtsp_password), rtsp_puerto, rtsp_canal, rtsp_subtipo,
                  zona_exclusion_id),
             )
             return cur.fetchone()
@@ -50,6 +51,8 @@ def update_camara(camara_id: int, **campos) -> tuple | None:
     campos = {k: v for k, v in campos.items() if v is not None}
     if not campos:
         return get_camara(camara_id)
+    if "rtsp_password" in campos:
+        campos["rtsp_password"] = cifrar(campos["rtsp_password"])
 
     sets = ", ".join(f"{k} = %s" for k in campos)
     with get_db() as conn:
@@ -108,6 +111,13 @@ def update_estado(camara_id: int, activa: bool) -> tuple | None:
                 (activa, camara_id),
             )
             return cur.fetchone()
+
+
+def set_password_cifrada(camara_id: int, valor: str) -> None:
+    """Solo para scripts/cifrar_rtsp_passwords.py: guarda un valor ya cifrado."""
+    with get_db() as conn:
+        with conn.cursor() as cur:
+            cur.execute("UPDATE camaras_ip SET rtsp_password = %s WHERE id = %s", (valor, camara_id))
 
 
 def delete_camara(camara_id: int) -> None:

@@ -15,10 +15,12 @@ import threading
 import time
 from urllib.parse import quote_plus
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import StreamingResponse
 
-from app.core.security import require_admin, require_auth
+from app.core.auditoria import auditar, auditar_vista
+from app.core.cifrado import descifrar
+from app.core.security import decode_media_ticket, require_admin, require_auth
 from app.core.sse_manager import alerta_manager
 from app.models.schemas import (
     HistorialAnalisisOut,
@@ -27,7 +29,6 @@ from app.models.schemas import (
 )
 from app.core.rtsp_manager import cancel_session as rtsp_cancel, get_session as rtsp_get, set_session as rtsp_set
 from app.core.sesion_camara import finalizar_sesion_camara
-from app.core.security import decode_token
 from app.repositories import alerta_repo, analisis_repo, camara_repo, grabacion_repo, monitoreo_repo, zona_exclusion_repo
 from detector.yolo_detector import (
     crear_estado,
@@ -83,8 +84,9 @@ def _guardar_clip_alerta(alerta_id: int, frames: list[tuple[float, bytes]]) -> N
     """
     try:
         os.makedirs("uploads/evidencias", exist_ok=True)
-        ruta = f"uploads/evidencias/alerta_{alerta_id}.mp4"
-        if escribir_clip(frames, ruta):
+        # escribir_clip puede cambiar la extensión a .webm según el códec disponible
+        ruta = escribir_clip(frames, f"uploads/evidencias/alerta_{alerta_id}.mp4")
+        if ruta:
             alerta_repo.actualizar_clip(alerta_id, ruta)
     except Exception:
         logger.exception("Error al guardar clip de evidencia (alerta_id=%s)", alerta_id)
@@ -108,7 +110,9 @@ def _row_resultado(r: tuple) -> dict:
         "inicio_analisis": r[8].isoformat() if r[8] else None,
         "fin_analisis": r[9].isoformat() if r[9] else None,
         "fecha_registro": r[10].isoformat() if r[10] else None,
-        "frame_evidencia": r[11] if len(r) > 11 else None,
+        # La ruta en disco no se expone: el frontend pide la foto, con sesión,
+        # a este endpoint (ver app/routers/media.py).
+        "frame_evidencia": f"api/media/evidencia/resultado/{r[0]}" if len(r) > 11 and r[11] else None,
         "tipo_dia": _tipo_dia(r[8]),
     }
 
@@ -238,12 +242,14 @@ def obtener_historial(payload: dict = Depends(require_auth)):
 @router.delete("/resultado/{resultado_id}", status_code=204)
 def eliminar_resultado(
     resultado_id: int,
-    _: dict = Depends(require_admin),
+    request: Request,
+    payload: dict = Depends(require_admin),
 ):
     """Elimina un resultado del historial (y su captura de evidencia, si existe). Solo administrador."""
     row = analisis_repo.delete_resultado(resultado_id)
     if row is None:
         raise HTTPException(status_code=404, detail="Resultado no encontrado.")
+    auditar(request, payload, "eliminar_resultado", "resultado", resultado_id)
     evidencia_path = row[0]
     if evidencia_path and os.path.exists(evidencia_path):
         try:
@@ -398,7 +404,7 @@ def _build_rtsp_url(camara: tuple) -> str:
     #                         9=rtsp_puerto, 10=rtsp_canal, 11=rtsp_subtipo
     ip = camara[2]
     usuario = quote_plus(camara[7] or "admin")
-    password = quote_plus(camara[8] or "")
+    password = quote_plus(descifrar(camara[8]) or "")
     puerto = camara[9] or 554
     canal = camara[10] or 1
     subtipo = camara[11] if camara[11] is not None else 1
@@ -411,15 +417,16 @@ def _build_rtsp_url(camara: tuple) -> str:
 @router.get("/camara/{sesion_id}/mjpeg")
 async def stream_camara_mjpeg(
     sesion_id: int,
-    token: str = Query(..., description="JWT token (requerido porque <img> no envía headers)"),
+    request: Request,
+    ticket: str = Query(..., description="Ticket de POST /api/media/ticket (<img> no envía headers)"),
 ):
     """
     Stream MJPEG con detecciones dibujadas encima.
-    Acepta el JWT como ?token= porque el elemento <img> no puede enviar headers.
+    El <img> no puede mandar el header Authorization, así que la URL lleva un
+    ticket que vale solo para esta sesión y por un minuto (se valida al
+    conectar; el stream sigue abierto después). Ya no lleva el JWT de sesión.
     """
-    payload = decode_token(token)
-    if payload is None:
-        raise HTTPException(status_code=401, detail="Token inválido o expirado.")
+    claims = decode_media_ticket(ticket, "mjpeg", sesion_id)
 
     sesion = monitoreo_repo.get_sesion(sesion_id)
     if sesion is None:
@@ -441,6 +448,7 @@ async def stream_camara_mjpeg(
     camara = camara_repo.get_camara(camara_id)
     if camara is None:
         raise HTTPException(status_code=404, detail="Cámara no encontrada.")
+    auditar_vista(request, claims, "ver_camara", "camara", camara_id)
 
     zona_id = sesion[5]
     usuario_id = sesion[1]

@@ -85,6 +85,27 @@ def actualizar_clip(alerta_id: int, ruta: str) -> None:
             )
 
 
+def list_clips_vencidos(dias: int) -> list[tuple]:
+    """(id, clip_evidencia) de alertas con clip más antiguo que `dias`."""
+    with get_db() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT id, clip_evidencia FROM alertas
+                WHERE clip_evidencia IS NOT NULL
+                  AND fecha_alerta < NOW() - make_interval(days => %s)
+                """,
+                (dias,),
+            )
+            return cur.fetchall()
+
+
+def quitar_clip(alerta_id: int) -> None:
+    with get_db() as conn:
+        with conn.cursor() as cur:
+            cur.execute("UPDATE alertas SET clip_evidencia = NULL WHERE id = %s", (alerta_id,))
+
+
 def list_alertas(
     usuario_id: int | None = None,
     atendida: bool | None = None,

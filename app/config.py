@@ -14,6 +14,19 @@ class Settings(BaseSettings):
     # Edge (laptop en el local): clave compartida para /api/edge/*
     edge_api_key: str = ""
 
+    # Clave Fernet para cifrar las contraseñas RTSP en la BD. Debe ser la
+    # MISMA en la laptop del local y en Railway, porque las dos usan la misma
+    # base. Generar con: python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
+    rtsp_enc_key: str = ""
+
+    # Vigencia de los tickets que reemplazan al JWT en la URL de <img>/<video>
+    media_ticket_segundos: int = 60
+    media_ticket_grabacion_segundos: int = 1800
+
+    # Días que se conservan las evidencias (D.S. 007-2020-IN: mínimo 45;
+    # Directiva 01-2020-JUS/DGTAIPD: máximo 60). 0 desactiva el borrado.
+    retencion_dias: int = 60
+
     # Carpetas de archivos
     grabaciones_folder: str = "uploads/grabaciones"
     zonas_frames_folder: str = "uploads/frames"

@@ -288,3 +288,27 @@ class UsuarioAdminOut(BaseModel):
 
 class EstadoUsuarioRequest(BaseModel):
     activo: bool
+
+
+# ── Prevención de pérdida de datos: tickets de medios y auditoría ─────────────
+
+class TicketMediaRequest(BaseModel):
+    recurso: Literal["mjpeg", "grabacion"]
+    id: int
+
+
+class TicketMediaOut(BaseModel):
+    ticket: str
+    expira_en_segundos: int
+
+
+class RegistroAuditoriaOut(BaseModel):
+    id: int
+    fecha: datetime
+    usuario_id: int | None
+    usuario_nombre: str | None
+    accion: str
+    recurso: str | None
+    recurso_id: int | None
+    detalle: str | None
+    ip: str | None
