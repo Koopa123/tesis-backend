@@ -13,7 +13,7 @@ import json
 import os
 import time
 from collections import deque
-from threading import Lock
+from threading import Condition, Lock, Thread
 
 import torch
 import cv2
@@ -628,9 +628,17 @@ def procesar_rtsp_mjpeg(
     on_frame,       # callable(jpeg_bytes: bytes, resultado: dict, alerta: bool) → None
 ):
     """
-    Abre un stream RTSP continuo, procesa cada frame con YOLO+BFS, dibuja
-    detecciones y llama on_frame con el JPEG anotado + stats.
+    Abre un stream RTSP continuo, procesa el frame más reciente con YOLO+BFS,
+    dibuja detecciones y llama on_frame con el JPEG anotado + stats.
     Se detiene cuando cancelado_fn() devuelve True o tras 3 fallos seguidos.
+
+    La lectura va en un hilo aparte que solo conserva el último frame: si el
+    análisis tarda más que lo que la cámara tarda en mandar el siguiente
+    (varias cámaras compartiendo la GPU), los frames intermedios se descartan
+    en vez de acumularse en el buffer de FFmpeg. Antes se leían en el mismo
+    bucle que el análisis y el retraso crecía sin límite (segundos detrás de
+    la cámara, sobre todo al volver a una sesión que siguió viva sin
+    espectadores).
     """
     cap = cv2.VideoCapture(rtsp_url, cv2.CAP_FFMPEG)
     cap.set(cv2.CAP_PROP_OPEN_TIMEOUT_MSEC, 10_000)
@@ -638,37 +646,66 @@ def procesar_rtsp_mjpeg(
     cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
 
     if not cap.isOpened():
+        cap.release()
         on_frame(None, {"tipo": "error", "mensaje": "No se pudo conectar al stream RTSP."}, False)
         return
 
-    # Control de ritmo por tiempo real (no por conteo de frames): cap.get(FPS)
-    # puede ser poco confiable o el stream puede entregar frames a ráfagas, y
-    # decidir "saltar" solo por conteo puede dejar el bucle sin freno real,
-    # saturando la CPU (JPEG encode/decode) y matando de hambre al event loop
-    # de uvicorn (GIL) aunque nada esté técnicamente en deadlock.
+    # Tope de ritmo por tiempo real: con una sola cámara en GPU el análisis
+    # puede ir más rápido que la cámara, y sin freno el bucle saturaría la CPU
+    # (JPEG encode/decode) y mataría de hambre al event loop de uvicorn (GIL).
     INTERVALO_MIN = 1.0 / 25  # ~25 fps máximo, en GPU. En CPU, subir este valor.
-    ultimo_procesado = 0.0
-    fallos = 0
+
+    def cancelado() -> bool:
+        return bool(cancelado_fn and cancelado_fn())
+
+    ultimo = {"frame": None, "nuevo": False, "fin": False}
+    cond = Condition()
+
+    def _leer():
+        # Único dueño de `cap`: lo libera él mismo al terminar, así nunca se
+        # hace release() mientras un read() sigue en curso en este hilo.
+        fallos = 0
+        try:
+            while not ultimo["fin"] and not cancelado():
+                ret, frame = cap.read()
+                if not ret:
+                    fallos += 1
+                    if fallos >= 3:
+                        break
+                    time.sleep(0.1)
+                    continue
+                fallos = 0
+                with cond:
+                    ultimo["frame"] = frame
+                    ultimo["nuevo"] = True
+                    cond.notify()
+        finally:
+            cap.release()
+            with cond:
+                ultimo["fin"] = True
+                cond.notify()
+
+    lector = Thread(target=_leer, daemon=True, name="lector-rtsp")
+    lector.start()
 
     zonas_exc = estado.zonas_exclusion
     umbral_m = estado.umbral_medio
     umbral_a = estado.umbral_alto
+    ultimo_procesado = 0.0
 
     try:
-        while not (cancelado_fn and cancelado_fn()):
-            ret, frame = cap.read()
-            if not ret:
-                fallos += 1
-                if fallos >= 3:
-                    break
-                time.sleep(0.1)
-                continue
-            fallos = 0
-
-            ahora = time.time()
-            if ahora - ultimo_procesado < INTERVALO_MIN:
-                continue
-            ultimo_procesado = ahora
+        while not cancelado():
+            espera = INTERVALO_MIN - (time.time() - ultimo_procesado)
+            if espera > 0:
+                time.sleep(espera)
+            with cond:
+                while not ultimo["nuevo"] and not ultimo["fin"] and not cancelado():
+                    cond.wait(timeout=0.5)
+                if not ultimo["nuevo"]:
+                    break  # el lector terminó (3 fallos) o se canceló
+                frame = ultimo["frame"]
+                ultimo["nuevo"] = False
+            ultimo_procesado = time.time()
 
             _, buf = cv2.imencode(".jpg", frame, [cv2.IMWRITE_JPEG_QUALITY, 80])
             frame_jpeg = buf.tobytes()
@@ -688,4 +725,8 @@ def procesar_rtsp_mjpeg(
             _, out_buf = cv2.imencode(".jpg", frame_anot, [cv2.IMWRITE_JPEG_QUALITY, 75])
             on_frame(out_buf.tobytes(), resultado, alerta)
     finally:
-        cap.release()
+        with cond:
+            ultimo["fin"] = True
+        # El read() en curso termina a lo sumo en READ_TIMEOUT (5 s); si tarda
+        # más, el lector igual libera la cámara al salir.
+        lector.join(timeout=6)
