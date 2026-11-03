@@ -29,6 +29,9 @@ agente consulta cada 2 s GET /api/edge/local del back-end local
 ("local_api_url" en edge_config.json, por defecto http://127.0.0.1:8000): si
 la cámara aparece ahí, cierra su propia conexión y solo reenvía a la nube ese
 resultado; cuando la sesión local termina, vuelve a analizarla por su cuenta.
+Cuando el agente analiza por su cuenta y detecta una alerta, la registra en el
+back-end local (suena en la laptop) y le adjunta el clip de 8 s, igual que
+haría una sesión de Multi-cámara.
 El back-end local necesita la misma EDGE_API_KEY en su .env.
 """
 
@@ -42,7 +45,7 @@ from pathlib import Path
 
 import requests
 
-from detector.yolo_detector import SesionAnalisisState, procesar_rtsp_mjpeg, warmup
+from detector.yolo_detector import SesionAnalisisState, escribir_clip, procesar_rtsp_mjpeg, warmup
 
 logging.basicConfig(
     level=logging.INFO,
@@ -51,6 +54,8 @@ logging.basicConfig(
 logger = logging.getLogger("edge_agent")
 
 CONFIG_PATH = Path(__file__).parent / "edge_config.json"
+# La misma carpeta que usa el back-end local: los clips del agente se sirven igual.
+EVIDENCIAS = Path(__file__).parent / "uploads" / "evidencias"
 
 # Intervalo mínimo entre reportes "normales" (sin alerta) a la nube, para no
 # saturar la API con un POST por cada frame (~25/seg). Las alertas se
@@ -95,6 +100,23 @@ class VigiaLocal:
     def sesion(self, camara_id: int) -> dict | None:
         with self._lock:
             return self._camaras.get(camara_id)
+
+    def registrar_alerta(self, datos: dict) -> dict | None:
+        """Registra la alerta en el back-end local (suena en la laptop). None si no responde."""
+        try:
+            resp = self._http.post(f"{self.url}/api/edge/local/alerta", json=datos,
+                                   headers=self.headers, timeout=5)
+            return resp.json() if resp.status_code == 200 else None
+        except (requests.RequestException, ValueError):
+            return None
+
+    def adjuntar_clip(self, alerta_id: int, archivo: str) -> bool:
+        try:
+            resp = self._http.put(f"{self.url}/api/edge/local/alerta/{alerta_id}/clip",
+                                  json={"archivo": archivo}, headers=self.headers, timeout=5)
+            return resp.status_code == 204
+        except requests.RequestException:
+            return False
 
     def foto_alerta(self, camara_id: int) -> bytes | None:
         try:
@@ -170,6 +192,37 @@ def _reenviar_sesion_local(cam: dict, vigia: VigiaLocal, api_url: str, api_key: 
         time.sleep(1)
 
 
+def _alerta_propia(payload: dict, clip: list | None, vigia: VigiaLocal,
+                   api_url: str, api_key: str, session: requests.Session) -> None:
+    """
+    Alerta que detectó el propio agente (nadie tenía la cámara abierta).
+    1) Se registra en el back-end local, para que suene en la laptop.
+    2) Se reporta a la nube, que reutiliza esa misma alerta y avisa a los
+       usuarios remotos (crear_alerta_sin_duplicar).
+    3) Se graba el clip con los últimos 8 s que ya estaban en memoria y se
+       adjunta a la alerta. Es lo único lento, por eso va al final.
+    Si el back-end local no responde, la alerta llega igual por la nube, sin clip.
+    """
+    camara_id = payload["camara_id"]
+    local = vigia.registrar_alerta({k: payload[k] for k in ("camara_id", "zona_config_id", "personas", "nivel")})
+    reportar(session, api_url, api_key, payload)
+    if local is None:
+        logger.warning("Cámara %s: el back-end local no respondió; la alerta queda sin clip.", camara_id)
+        return
+    if local.get("tiene_clip") or not clip:
+        return
+    try:
+        EVIDENCIAS.mkdir(parents=True, exist_ok=True)
+        ruta = escribir_clip(clip, str(EVIDENCIAS / f"alerta_{local['id']}.mp4"))
+    except Exception:
+        logger.exception("Cámara %s: no se pudo grabar el clip de la alerta %s", camara_id, local["id"])
+        return
+    if ruta and vigia.adjuntar_clip(local["id"], Path(ruta).name):
+        logger.info("Cámara %s: clip de la alerta %s guardado.", camara_id, local["id"])
+    else:
+        logger.warning("Cámara %s: no se pudo adjuntar el clip de la alerta %s.", camara_id, local["id"])
+
+
 def _monitorear_camara(cam: dict, api_url: str, api_key: str, session: requests.Session,
                        vigia: VigiaLocal) -> None:
     camara_id = cam["camara_id"]
@@ -203,7 +256,13 @@ def _monitorear_camara(cam: dict, api_url: str, api_key: str, session: requests.
             payload["frame_evidencia_b64"] = base64.b64encode(jpeg_bytes).decode("ascii")
 
         ultimo_reporte = ahora
-        reportar(session, api_url, api_key, payload)
+        if alerta:
+            # El búfer de 8 s se copió al confirmarse la alerta (estado.actualizar).
+            clip, estado.clip_pendiente = estado.clip_pendiente, None
+            threading.Thread(target=_alerta_propia, daemon=True,
+                             args=(payload, clip, vigia, api_url, api_key, session)).start()
+        else:
+            reportar(session, api_url, api_key, payload)
 
     def local_activa() -> bool:
         return vigia.sesion(camara_id) is not None

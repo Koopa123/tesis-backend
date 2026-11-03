@@ -12,6 +12,8 @@ GET  /api/edge/estado                 → estado en vivo de todas las cámaras (
 GET  /api/edge/estado/{id}/evidencia  → última foto de evidencia en base64 (auth: usuario)
 GET  /api/edge/local                  → cámaras que este back-end ya analiza (auth: API key)
 GET  /api/edge/local/{id}/foto-alerta → foto de la última alerta de esa sesión (auth: API key)
+POST /api/edge/local/alerta           → el agente registra su alerta y avisa en la laptop (auth: API key)
+PUT  /api/edge/local/alerta/{id}/clip → el agente adjunta el clip de 8 s que grabó (auth: API key)
 
 Las dos rutas /local las consulta el agente en la misma laptop: si el back-end
 local ya tiene una sesión viva de una cámara (alguien abrió Multi-cámara), el
@@ -20,9 +22,12 @@ Así cada cámara se analiza una sola vez. En Railway esas listas salen vacías.
 """
 
 import logging
+import os
+import re
 import time
 
 from fastapi import APIRouter, Depends, HTTPException, Response
+from pydantic import BaseModel
 
 from app.core.rtsp_manager import sesiones_de_camara
 from app.core.security import require_auth, require_edge_key
@@ -154,3 +159,63 @@ def foto_alerta_local(camara_id: int, _: None = Depends(require_edge_key)):
             if foto:
                 return Response(content=foto, media_type="image/jpeg")
     raise HTTPException(status_code=404, detail="Sin foto de alerta para esa cámara.")
+
+
+# ── POST /local/alerta y PUT /local/alerta/{id}/clip — alertas del agente ────
+# Cuando el agente analiza una cámara por su cuenta (nadie la tiene abierta en
+# Multi-cámara), registra la alerta aquí primero: así suena en las pantallas
+# conectadas a este back-end local, y el agente recibe el id para guardar el
+# clip de 8 s con el mismo nombre que usan las sesiones locales.
+
+_EVIDENCIAS = "uploads/evidencias"
+
+
+class EdgeAlertaLocalIn(BaseModel):
+    camara_id: int
+    zona_config_id: int | None = None
+    personas: int
+    nivel: str = "alto"
+
+
+class EdgeClipIn(BaseModel):
+    archivo: str
+
+
+@router.post("/local/alerta")
+async def registrar_alerta_local(data: EdgeAlertaLocalIn, _: None = Depends(require_edge_key)):
+    camara = camara_repo.get_camara(data.camara_id)
+    if camara is None:
+        raise HTTPException(status_code=404, detail="Cámara no encontrada.")
+    zona_id = data.zona_config_id if data.zona_config_id is not None else camara[12]
+    nivel = data.nivel if data.nivel in ("bajo", "medio", "alto") else "alto"
+    fila, creada = alerta_repo.crear_alerta_sin_duplicar(
+        sesion_id=None, usuario_id=None, zona_config_id=zona_id,
+        nivel=nivel, personas=data.personas, camara_id=data.camara_id,
+    )
+    if creada:
+        # Si se reutilizó una alerta de la sesión local, esta ya avisó.
+        await alerta_manager.broadcast({
+            "tipo": "alerta",
+            "id": fila[0],
+            "sesion_id": None,
+            "camara_id": data.camara_id,
+            "camara_nombre": camara[1],
+            "nivel": nivel,
+            "personas": data.personas,
+            "fecha_alerta": fila[7].isoformat() if fila[7] else None,
+        })
+    return {"id": fila[0], "creada": creada, "tiene_clip": fila[10] is not None}
+
+
+@router.put("/local/alerta/{alerta_id}/clip", status_code=204)
+def adjuntar_clip_local(alerta_id: int, data: EdgeClipIn, _: None = Depends(require_edge_key)):
+    # Solo el nombre que corresponde a esta alerta y dentro de la carpeta de
+    # evidencias: el agente no puede apuntar el clip a otro archivo.
+    if not re.fullmatch(rf"alerta_{alerta_id}\.(mp4|webm)", data.archivo):
+        raise HTTPException(status_code=422, detail="Nombre de clip no válido.")
+    ruta = f"{_EVIDENCIAS}/{data.archivo}"
+    if not os.path.isfile(ruta):
+        raise HTTPException(status_code=404, detail="El clip no existe en la carpeta de evidencias.")
+    if alerta_repo.get_alerta(alerta_id) is None:
+        raise HTTPException(status_code=404, detail="Alerta no encontrada.")
+    alerta_repo.actualizar_clip(alerta_id, ruta)
