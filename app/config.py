@@ -27,6 +27,12 @@ class Settings(BaseSettings):
     # Directiva 01-2020-JUS/DGTAIPD: máximo 60). 0 desactiva el borrado.
     retencion_dias: int = 60
 
+    # Respaldo diario de la BD con pg_dump (solo donde esté instalado, o sea la
+    # laptop). Se guardan los últimos `respaldo_dias`; 0 lo desactiva.
+    respaldo_dias: int = 30
+    respaldo_folder: str = "respaldos_bd"
+    pg_dump_path: str = ""
+
     # Carpetas de archivos
     grabaciones_folder: str = "uploads/grabaciones"
     zonas_frames_folder: str = "uploads/frames"

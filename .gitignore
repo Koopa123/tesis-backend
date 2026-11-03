@@ -37,6 +37,7 @@ logs/
 
 # ── Archivos de subida y temporales ──────────────────────────
 uploads/
+respaldos_bd/
 temp/
 tmp/
 

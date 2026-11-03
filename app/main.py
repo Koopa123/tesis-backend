@@ -6,7 +6,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.config import get_settings
-from app.core import retencion, singleton_lock
+from app.core import respaldo, retencion, singleton_lock
 from app.core.rtsp_manager import cancel_all_sessions
 from app.database import close_pool, init_pool
 from app.routers import (
@@ -65,6 +65,7 @@ async def lifespan(app: FastAPI):
         logger.exception("No se pudo precargar el modelo YOLO en el warmup")
 
     retencion.iniciar()
+    respaldo.iniciar()
     logger.info("App lista ✓")
 
     yield  # ← la app corre aquí
@@ -75,6 +76,7 @@ async def lifespan(app: FastAPI):
     # cuando closeall() la cierra, dejando el apagado colgado indefinidamente.
     cancel_all_sessions()
     retencion.detener()
+    respaldo.detener()
     close_pool()
     singleton_lock.release()
     logger.info("App apagada ✓")
