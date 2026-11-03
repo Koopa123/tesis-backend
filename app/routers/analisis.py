@@ -312,6 +312,13 @@ def _rtsp_session_start(
         # sesión de cámara IP es compartida (ver stream_camara_mjpeg), así
         # que el hilo solo se detiene cuando se va el último.
         "espectadores": 0,
+        # Lo lee el agente edge (GET /api/edge/local) para no volver a
+        # analizar una cámara que esta sesión ya está analizando.
+        "camara_id": camara_id,
+        "zona_id": zona_id,
+        "t_resultado": None,
+        "ultima_alerta_id": None,
+        "frame_alerta": None,
     }
 
     rtsp_set(sesion_id, session_data)
@@ -321,10 +328,15 @@ def _rtsp_session_start(
             session_data["frame"] = jpeg_bytes
             session_data["resultado"] = resultado
             session_data["alerta"] = alerta
+            if resultado.get("tipo") != "error":
+                session_data["t_resultado"] = time.time()
 
         if alerta:
             try:
-                db_alerta = alerta_repo.crear_alerta(
+                # Si el agente edge ya registró esta misma aglomeración (en la
+                # transición, cuando todavía analizaba la cámara por su
+                # cuenta), se reutiliza su alerta y se le agrega el clip.
+                db_alerta, _ = alerta_repo.crear_alerta_sin_duplicar(
                     sesion_id=sesion_id,
                     usuario_id=usuario_id,
                     zona_config_id=zona_id,
@@ -332,6 +344,9 @@ def _rtsp_session_start(
                     personas=resultado.get("personas", 0),
                     camara_id=camara_id,
                 )
+                with session_data["lock"]:
+                    session_data["ultima_alerta_id"] = db_alerta[0]
+                    session_data["frame_alerta"] = jpeg_bytes
                 # La cámara IP es compartida: la alerta es del equipo de
                 # seguridad, no solo de quien abrió la sesión, así que se avisa
                 # a todos los usuarios conectados (igual que las del edge).

@@ -21,6 +21,15 @@ Uso:
 
 Este script es un proceso aparte, sin FastAPI ni conexión a la base de
 datos — pensado para quedar corriendo indefinidamente en la laptop.
+
+Si el back-end local también está corriendo (Iniciar CrowdSense) y alguien
+abre una cámara en Multi-cámara, el back-end ya la está analizando. Para no
+analizarla dos veces (doble conexión RTSP, doble GPU y alertas repetidas), el
+agente consulta cada 2 s GET /api/edge/local del back-end local
+("local_api_url" en edge_config.json, por defecto http://127.0.0.1:8000): si
+la cámara aparece ahí, cierra su propia conexión y solo reenvía a la nube ese
+resultado; cuando la sesión local termina, vuelve a analizarla por su cuenta.
+El back-end local necesita la misma EDGE_API_KEY en su .env.
 """
 
 import base64
@@ -47,6 +56,53 @@ CONFIG_PATH = Path(__file__).parent / "edge_config.json"
 # saturar la API con un POST por cada frame (~25/seg). Las alertas se
 # reportan de inmediato, sin esperar este intervalo.
 REPORTE_INTERVALO_SEG = 5.0
+
+# Cada cuánto se pregunta al back-end local qué cámaras ya está analizando.
+VIGIA_INTERVALO_SEG = 2.0
+# Un resultado local más viejo que esto (cámara caída) no se reenvía.
+RESULTADO_MAX_EDAD_SEG = 10.0
+
+
+class VigiaLocal:
+    """Sabe qué cámaras está analizando el back-end de esta misma laptop."""
+
+    def __init__(self, url: str, api_key: str):
+        self.url = url.rstrip("/")
+        self.headers = {"X-Edge-Api-Key": api_key}
+        self._camaras: dict[int, dict] = {}
+        self._lock = threading.Lock()
+        self._http = requests.Session()
+
+    def ciclo(self) -> None:
+        avisado = False
+        while True:
+            try:
+                resp = self._http.get(f"{self.url}/api/edge/local", headers=self.headers, timeout=3)
+                resp.raise_for_status()
+                consultado = time.time()
+                camaras = {c["camara_id"]: {**c, "consultado": consultado} for c in resp.json()["camaras"]}
+                avisado = False
+            except (requests.RequestException, ValueError, KeyError) as exc:
+                # Back-end local apagado o sin la clave: el agente analiza todo.
+                if not avisado:
+                    logger.info("Back-end local no disponible (%s); el agente analiza todas las cámaras.", exc)
+                    avisado = True
+                camaras = {}
+            with self._lock:
+                self._camaras = camaras
+            time.sleep(VIGIA_INTERVALO_SEG)
+
+    def sesion(self, camara_id: int) -> dict | None:
+        with self._lock:
+            return self._camaras.get(camara_id)
+
+    def foto_alerta(self, camara_id: int) -> bytes | None:
+        try:
+            resp = self._http.get(f"{self.url}/api/edge/local/{camara_id}/foto-alerta",
+                                  headers=self.headers, timeout=3)
+            return resp.content if resp.status_code == 200 else None
+        except requests.RequestException:
+            return None
 
 
 def cargar_config() -> dict:
@@ -79,7 +135,43 @@ def reportar(session: requests.Session, api_url: str, api_key: str, payload: dic
         logger.warning("No se pudo reportar a la nube (camara_id=%s): %s", payload["camara_id"], exc)
 
 
-def _monitorear_camara(cam: dict, api_url: str, api_key: str, session: requests.Session) -> None:
+def _reenviar_sesion_local(cam: dict, vigia: VigiaLocal, api_url: str, api_key: str,
+                           session: requests.Session) -> None:
+    """Mientras el back-end local analiza la cámara, solo reenvía su resultado a la nube."""
+    camara_id = cam["camara_id"]
+    ultimo_reporte = 0.0
+    ultima_alerta = None
+    primera = True
+    while True:
+        info = vigia.sesion(camara_id)
+        if info is None:
+            return
+        if primera:
+            # La alerta que ya tenía la sesión al empezar a reenviar no es nueva.
+            ultima_alerta, primera = info["ultima_alerta_id"], False
+        ahora = time.time()
+        nueva_alerta = info["ultima_alerta_id"] is not None and info["ultima_alerta_id"] != ultima_alerta
+        edad = info["edad_seg"] + (ahora - info["consultado"])
+        if edad <= RESULTADO_MAX_EDAD_SEG and (nueva_alerta or ahora - ultimo_reporte >= REPORTE_INTERVALO_SEG):
+            payload = {
+                "camara_id": camara_id,
+                "zona_config_id": info["zona_config_id"] if info["zona_config_id"] is not None else cam.get("zona_config_id"),
+                "personas": info["personas"],
+                "nivel": info["nivel"],
+                "alerta": nueva_alerta,
+            }
+            if nueva_alerta:
+                foto = vigia.foto_alerta(camara_id)
+                if foto:
+                    payload["frame_evidencia_b64"] = base64.b64encode(foto).decode("ascii")
+            ultima_alerta = info["ultima_alerta_id"]
+            ultimo_reporte = ahora
+            reportar(session, api_url, api_key, payload)
+        time.sleep(1)
+
+
+def _monitorear_camara(cam: dict, api_url: str, api_key: str, session: requests.Session,
+                       vigia: VigiaLocal) -> None:
     camara_id = cam["camara_id"]
     rtsp_url = cam["rtsp_url"]
     zona_config = cam.get("zona_config")  # None => usa umbrales por defecto (4/6)
@@ -113,22 +205,31 @@ def _monitorear_camara(cam: dict, api_url: str, api_key: str, session: requests.
         ultimo_reporte = ahora
         reportar(session, api_url, api_key, payload)
 
-    logger.info("Cámara %s: conectando...", camara_id)
+    def local_activa() -> bool:
+        return vigia.sesion(camara_id) is not None
 
     # Reintenta indefinidamente si la cámara/RTSP se cae — procesar_rtsp_mjpeg
     # termina tras 3 fallos de lectura seguidos, así que este bucle exterior
     # es lo que sostiene el monitoreo "24/7" ante cortes de red/cámara.
     while True:
+        if local_activa():
+            logger.info("Cámara %s: la analiza el back-end local; el agente solo reenvía su resultado.", camara_id)
+            _reenviar_sesion_local(cam, vigia, api_url, api_key, session)
+            logger.info("Cámara %s: terminó la sesión local; el agente vuelve a analizarla.", camara_id)
+            continue
+        logger.info("Cámara %s: conectando...", camara_id)
         try:
             procesar_rtsp_mjpeg(
                 rtsp_url=rtsp_url,
                 zona_config=zona_config,
                 estado=estado,
-                cancelado_fn=lambda: False,
+                cancelado_fn=local_activa,
                 on_frame=on_frame,
             )
         except Exception:
             logger.exception("Cámara %s: error inesperado en el hilo de análisis", camara_id)
+        if local_activa():
+            continue
         logger.warning("Cámara %s: stream cortado, reintentando en 5s...", camara_id)
         time.sleep(5)
 
@@ -147,11 +248,13 @@ def main() -> None:
     warmup()
 
     session = requests.Session()
+    vigia = VigiaLocal(config.get("local_api_url", "http://127.0.0.1:8000"), api_key)
+    threading.Thread(target=vigia.ciclo, daemon=True, name="vigia-local").start()
     hilos = []
     for cam in camaras:
         t = threading.Thread(
             target=_monitorear_camara,
-            args=(cam, api_url, api_key, session),
+            args=(cam, api_url, api_key, session, vigia),
             daemon=True,
             name=f"camara-{cam['camara_id']}",
         )

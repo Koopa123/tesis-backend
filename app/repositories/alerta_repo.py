@@ -42,6 +42,52 @@ def crear_alerta(
             return cur.fetchone()
 
 
+def crear_alerta_sin_duplicar(
+    sesion_id: int | None,
+    usuario_id: int | None,
+    zona_config_id: int | None,
+    nivel: str,
+    personas: int,
+    camara_id: int | None,
+    ventana_segundos: float = 5.0,
+) -> tuple[tuple, bool]:
+    """
+    Como crear_alerta(), pero si la cámara ya tiene una alerta de hace menos
+    de `ventana_segundos` devuelve esa en lugar de crear otra. Devuelve
+    (fila, creada).
+
+    La misma aglomeración puede llegar por dos caminos: la sesión de cámara
+    del back-end local y el agente edge (vía Railway), que comparten la base.
+    El candado por cámara evita que los dos inserten a la vez.
+    """
+    if camara_id is None:
+        return crear_alerta(sesion_id, usuario_id, zona_config_id, nivel, personas), True
+    with get_db() as conn:
+        with conn.cursor() as cur:
+            cur.execute("SELECT pg_advisory_xact_lock(%s, %s)", (4201, camara_id))
+            cur.execute(
+                f"""
+                SELECT {_COLS} FROM alertas
+                WHERE camara_id = %s AND fecha_alerta > NOW() - make_interval(secs => %s)
+                ORDER BY fecha_alerta DESC LIMIT 1
+                """,
+                (camara_id, ventana_segundos),
+            )
+            existente = cur.fetchone()
+            if existente:
+                return existente, False
+            cur.execute(
+                f"""
+                INSERT INTO alertas
+                    (sesion_id, usuario_id, zona_config_id, nivel, personas, camara_id)
+                VALUES (%s, %s, %s, %s, %s, %s)
+                RETURNING {_COLS}
+                """,
+                (sesion_id, usuario_id, zona_config_id, nivel, personas, camara_id),
+            )
+            return cur.fetchone(), True
+
+
 def get_alerta(alerta_id: int) -> tuple | None:
     with get_db() as conn:
         with conn.cursor() as cur:

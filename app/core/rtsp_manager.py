@@ -14,6 +14,16 @@ def get_session(sesion_id: int) -> dict | None:
     return _sessions.get(sesion_id)
 
 
+def sesiones_de_camara() -> list[tuple[int, dict]]:
+    """Sesiones de cámara IP vivas (las de grabación no tienen camara_id)."""
+    with _lock:
+        items = list(_sessions.items())
+    return [
+        (sid, d) for sid, d in items
+        if d.get("camara_id") is not None and not d["cancelado"].is_set()
+    ]
+
+
 def cancel_session(sesion_id: int) -> None:
     """Señaliza al hilo RTSP que se detenga y elimina la entrada."""
     with _lock:

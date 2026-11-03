@@ -10,12 +10,21 @@ fija (X-Edge-Api-Key, ver app/core/security.py::require_edge_key).
 POST /api/edge/deteccion              → reporta el estado de una cámara (auth: API key)
 GET  /api/edge/estado                 → estado en vivo de todas las cámaras (auth: usuario)
 GET  /api/edge/estado/{id}/evidencia  → última foto de evidencia en base64 (auth: usuario)
+GET  /api/edge/local                  → cámaras que este back-end ya analiza (auth: API key)
+GET  /api/edge/local/{id}/foto-alerta → foto de la última alerta de esa sesión (auth: API key)
+
+Las dos rutas /local las consulta el agente en la misma laptop: si el back-end
+local ya tiene una sesión viva de una cámara (alguien abrió Multi-cámara), el
+agente cierra su propia conexión RTSP y solo reenvía a la nube ese resultado.
+Así cada cámara se analiza una sola vez. En Railway esas listas salen vacías.
 """
 
 import logging
+import time
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Response
 
+from app.core.rtsp_manager import sesiones_de_camara
 from app.core.security import require_auth, require_edge_key
 from app.core.sse_manager import alerta_manager
 from app.models.schemas import EdgeDeteccionIn, EstadoCamarasOut
@@ -69,7 +78,10 @@ async def reportar_deteccion(
             # sesion_id/usuario_id en NULL: esta alerta no viene de una
             # sesión de monitoreo iniciada desde el navegador, viene del
             # proceso que corre en la laptop del local.
-            db_alerta = alerta_repo.crear_alerta(
+            # Si la sesión del back-end local ya registró esta aglomeración
+            # (el agente solo reenvía su resultado), se reutiliza esa alerta:
+            # aquí solo se avisa a los usuarios conectados a esta instancia.
+            db_alerta, _ = alerta_repo.crear_alerta_sin_duplicar(
                 sesion_id=None,
                 usuario_id=None,
                 zona_config_id=zona_id,
@@ -108,3 +120,37 @@ def obtener_evidencia(camara_id: int, _: dict = Depends(require_auth)):
     if fila is None or fila[5] is None:
         raise HTTPException(status_code=404, detail="No hay evidencia para esta cámara.")
     return {"camara_id": camara_id, "frame_evidencia_b64": fila[5]}
+
+
+# ── GET /local — sesiones de cámara de este mismo back-end ──────────────────
+
+@router.get("/local")
+def sesiones_locales(_: None = Depends(require_edge_key)):
+    ahora = time.time()
+    camaras = []
+    for sesion_id, d in sesiones_de_camara():
+        with d["lock"]:
+            resultado, t, alerta_id = d.get("resultado"), d.get("t_resultado"), d.get("ultima_alerta_id")
+        if not resultado or t is None or "personas" not in resultado:
+            continue  # todavía sin un cuadro analizado: el agente sigue con lo suyo
+        camaras.append({
+            "camara_id": d["camara_id"],
+            "sesion_id": sesion_id,
+            "zona_config_id": d.get("zona_id"),
+            "personas": resultado["personas"],
+            "nivel": resultado.get("nivel", "sin_aglomeracion"),
+            "edad_seg": round(ahora - t, 1),
+            "ultima_alerta_id": alerta_id,
+        })
+    return {"camaras": camaras}
+
+
+@router.get("/local/{camara_id}/foto-alerta")
+def foto_alerta_local(camara_id: int, _: None = Depends(require_edge_key)):
+    for _sid, d in sesiones_de_camara():
+        if d["camara_id"] == camara_id:
+            with d["lock"]:
+                foto = d.get("frame_alerta")
+            if foto:
+                return Response(content=foto, media_type="image/jpeg")
+    raise HTTPException(status_code=404, detail="Sin foto de alerta para esa cámara.")
