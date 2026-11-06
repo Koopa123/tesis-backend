@@ -14,6 +14,7 @@ GET  /api/edge/local                  → cámaras que este back-end ya analiza 
 GET  /api/edge/local/{id}/foto-alerta → foto de la última alerta de esa sesión (auth: API key)
 POST /api/edge/local/alerta           → el agente registra su alerta y avisa en la laptop (auth: API key)
 PUT  /api/edge/local/alerta/{id}/clip → el agente adjunta el clip de 8 s que grabó (auth: API key)
+POST /api/edge/local/evento           → el agente registra un corte o una reconexión de cámara (auth: API key)
 
 Las dos rutas /local las consulta el agente en la misma laptop: si el back-end
 local ya tiene una sesión viva de una cámara (alguien abrió Multi-cámara), el
@@ -29,6 +30,7 @@ import time
 from fastapi import APIRouter, Depends, HTTPException, Response
 from pydantic import BaseModel
 
+from app.core.auditoria import auditar
 from app.core.rtsp_manager import sesiones_de_camara
 from app.core.security import require_auth, require_edge_key
 from app.core.sse_manager import alerta_manager
@@ -219,3 +221,20 @@ def adjuntar_clip_local(alerta_id: int, data: EdgeClipIn, _: None = Depends(requ
     if alerta_repo.get_alerta(alerta_id) is None:
         raise HTTPException(status_code=404, detail="Alerta no encontrada.")
     alerta_repo.actualizar_clip(alerta_id, ruta)
+
+
+# ── POST /local/evento — cortes de señal vistos por el agente ────────────────
+# El agente no tiene base de datos: cuando analiza una cámara por su cuenta y
+# esta pierde o recupera la señal, lo registra aquí para la auditoría.
+
+class EdgeEventoIn(BaseModel):
+    camara_id: int
+    evento: str
+    detalle: str | None = None
+
+
+@router.post("/local/evento", status_code=204)
+def registrar_evento_local(data: EdgeEventoIn, _: None = Depends(require_edge_key)):
+    if data.evento not in ("camara_sin_senal", "camara_reconectada"):
+        raise HTTPException(status_code=422, detail="Evento no válido.")
+    auditar(None, None, data.evento, "camara", data.camara_id, (data.detalle or None) and data.detalle[:200])

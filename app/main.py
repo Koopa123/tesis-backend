@@ -7,6 +7,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.config import get_settings
 from app.core import respaldo, retencion, singleton_lock
+from app.core.auditoria import auditar
 from app.core.rtsp_manager import cancel_all_sessions
 from app.database import close_pool, init_pool
 from app.routers import (
@@ -20,6 +21,9 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 settings = get_settings()
+
+# Railway define RAILWAY_ENVIRONMENT en sus contenedores; en la laptop no existe.
+_INSTANCIA = "Railway" if os.getenv("RAILWAY_ENVIRONMENT") else "equipo local"
 
 
 @asynccontextmanager
@@ -66,6 +70,9 @@ async def lifespan(app: FastAPI):
 
     retencion.iniciar()
     respaldo.iniciar()
+    # Arranques y apagados quedan en la auditoría: con ellos se mide cuánto
+    # estuvo disponible el sistema en el horario de atención.
+    auditar(None, None, "sistema_iniciado", "sistema", None, _INSTANCIA)
     logger.info("App lista ✓")
 
     yield  # ← la app corre aquí
@@ -75,6 +82,7 @@ async def lifespan(app: FastAPI):
     # de BD: si siguen corriendo, pueden quedar usando una conexión justo
     # cuando closeall() la cierra, dejando el apagado colgado indefinidamente.
     cancel_all_sessions()
+    auditar(None, None, "sistema_detenido", "sistema", None, _INSTANCIA)
     retencion.detener()
     respaldo.detener()
     close_pool()

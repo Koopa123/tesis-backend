@@ -45,6 +45,7 @@ from pathlib import Path
 
 import requests
 
+from app.core.senal import SeguimientoSenal
 from detector.yolo_detector import SesionAnalisisState, escribir_clip, procesar_rtsp_mjpeg, warmup
 
 logging.basicConfig(
@@ -117,6 +118,15 @@ class VigiaLocal:
             return resp.status_code == 204
         except requests.RequestException:
             return False
+
+    def registrar_evento(self, camara_id: int, evento: str, detalle: str | None) -> None:
+        """Corte o reconexión de una cámara, para la auditoría del back-end local."""
+        try:
+            self._http.post(f"{self.url}/api/edge/local/evento",
+                            json={"camara_id": camara_id, "evento": evento, "detalle": detalle},
+                            headers=self.headers, timeout=5)
+        except requests.RequestException:
+            logger.warning("Cámara %s: no se pudo registrar el evento %s", camara_id, evento)
 
     def foto_alerta(self, camara_id: int) -> bytes | None:
         try:
@@ -232,6 +242,8 @@ def _monitorear_camara(cam: dict, api_url: str, api_key: str, session: requests.
 
     estado = SesionAnalisisState(zona_config=zona_config)
     ultimo_reporte = 0.0
+    # Cortes y reconexiones mientras el agente analiza la cámara por su cuenta.
+    senal = SeguimientoSenal(lambda evento, detalle: vigia.registrar_evento(camara_id, evento, detalle))
 
     def on_frame(jpeg_bytes, resultado, alerta):
         nonlocal ultimo_reporte
@@ -239,6 +251,7 @@ def _monitorear_camara(cam: dict, api_url: str, api_key: str, session: requests.
         if resultado.get("tipo") == "error":
             logger.error("Cámara %s: %s", camara_id, resultado.get("mensaje"))
             return
+        senal.cuadro_recibido()
 
         ahora = time.time()
         es_periodico = ahora - ultimo_reporte >= REPORTE_INTERVALO_SEG
@@ -289,6 +302,7 @@ def _monitorear_camara(cam: dict, api_url: str, api_key: str, session: requests.
             logger.exception("Cámara %s: error inesperado en el hilo de análisis", camara_id)
         if local_activa():
             continue
+        senal.conexion_perdida()
         logger.warning("Cámara %s: stream cortado, reintentando en 5s...", camara_id)
         time.sleep(5)
 

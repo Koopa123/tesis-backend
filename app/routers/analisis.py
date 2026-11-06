@@ -28,6 +28,7 @@ from app.models.schemas import (
     ZonasCriticasOut,
 )
 from app.core.rtsp_manager import cancel_session as rtsp_cancel, get_session as rtsp_get, set_session as rtsp_set
+from app.core.senal import SeguimientoSenal
 from app.core.sesion_camara import finalizar_sesion_camara
 from app.repositories import alerta_repo, analisis_repo, camara_repo, grabacion_repo, monitoreo_repo, zona_exclusion_repo
 from detector.yolo_detector import (
@@ -323,6 +324,11 @@ def _rtsp_session_start(
 
     rtsp_set(sesion_id, session_data)
 
+    # Cortes y reconexiones de la cámara, para medir su disponibilidad.
+    senal = SeguimientoSenal(
+        lambda evento, detalle: auditar(None, None, evento, "camara", camara_id, detalle)
+    ) if camara_id is not None else None
+
     def on_frame(jpeg_bytes, resultado, alerta):
         with session_data["lock"]:
             session_data["frame"] = jpeg_bytes
@@ -330,6 +336,8 @@ def _rtsp_session_start(
             session_data["alerta"] = alerta
             if resultado.get("tipo") != "error":
                 session_data["t_resultado"] = time.time()
+        if senal and resultado.get("tipo") != "error":
+            senal.cuadro_recibido()
 
         if alerta:
             try:
@@ -398,6 +406,8 @@ def _rtsp_session_start(
                 logger.exception("Error inesperado en el hilo RTSP (sesion_id=%s)", sesion_id)
             if cancelado.is_set():
                 break
+            if senal:
+                senal.conexion_perdida()
             time.sleep(5)
         rtsp_cancel(sesion_id)  # limpia la entrada del manager cuando el hilo termina
         # La cámara se apagó (nadie la miraba, se abrió otra sesión o se
