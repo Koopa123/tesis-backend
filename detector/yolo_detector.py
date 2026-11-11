@@ -16,7 +16,15 @@ import time
 from collections import deque
 from threading import Condition, Lock, Thread
 
-import torch
+# En la nube (Railway) no se analiza video: las cámaras están en la red privada del local. Por eso allí no se
+# instalan PyTorch ni ultralytics, y este módulo tiene que poder importarse sin ellos (lo importan routers que
+# la nube sí usa). La detección solo está disponible donde están instalados: la laptop del local.
+try:
+    import torch
+except ImportError:
+    torch = None
+import importlib.util
+
 import cv2
 import numpy as np
 
@@ -32,7 +40,9 @@ _model_lock = Lock()
 # distintos no es seguro.
 _inference_lock = Lock()
 
-DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
+DETECCION_DISPONIBLE = torch is not None and importlib.util.find_spec("ultralytics") is not None
+DEVICE = "cuda" if torch is not None and torch.cuda.is_available() else "cpu"
+MENSAJE_SIN_DETECCION = ("El análisis de video solo está disponible en el equipo local del centro comercial.")
 
 NIVEL_ORDEN = ["sin_aglomeracion", "bajo", "medio", "alto"]
 
@@ -90,6 +100,8 @@ CONF_MIN_DEFAULT = 0.60
 
 def _get_model():
     global _model
+    if not DETECCION_DISPONIBLE:
+        raise RuntimeError(MENSAJE_SIN_DETECCION)
     if _model is None:
         with _model_lock:
             if _model is None:

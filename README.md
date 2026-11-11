@@ -40,9 +40,15 @@ Edita `.env` y rellena:
 
 ### 3. Instalar dependencias
 
+En la laptop del local (con detección), primero PyTorch para la GPU y después el resto:
+
 ```bash
-pip install -r requirements.txt
+pip install torch torchvision --index-url https://download.pytorch.org/whl/cu124
+pip install -r requirements-local.txt
 ```
+
+En la nube (Railway) solo se instala `requirements.txt`: allí no se analiza video y el backend arranca sin
+PyTorch ni ultralytics.
 
 ### 4. Crear el usuario administrador
 

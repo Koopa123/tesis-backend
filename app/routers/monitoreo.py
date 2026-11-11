@@ -4,6 +4,7 @@ from psycopg2 import errors as pg_errors
 from app.core.security import require_auth
 from app.models.schemas import MonitoreoIniciarRequest, MonitoreoOut
 from app.repositories import camara_repo, grabacion_repo, monitoreo_repo, zona_exclusion_repo
+from detector.yolo_detector import DETECCION_DISPONIBLE, MENSAJE_SIN_DETECCION
 
 router = APIRouter(prefix="/api/monitoreo", tags=["Monitoreo"])
 
@@ -30,6 +31,8 @@ def iniciar_monitoreo(
     data: MonitoreoIniciarRequest,
     payload: dict = Depends(require_auth),
 ):
+    if not DETECCION_DISPONIBLE:
+        raise HTTPException(status_code=503, detail=MENSAJE_SIN_DETECCION)
     zona_exclusion_id = data.zona_exclusion_id
 
     if data.tipo_fuente == "camara_ip":

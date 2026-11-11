@@ -58,11 +58,14 @@ async def lifespan(app: FastAPI):
     # primera cámara que abra un usuario — evita ese retraso extra (carga a
     # GPU + autotune de kernels CUDA) la primera vez que alguien conecta.
     import time as _time
-    from detector.yolo_detector import DEVICE as _device, warmup as warmup_modelo
+    from detector.yolo_detector import DETECCION_DISPONIBLE, DEVICE as _device, warmup as warmup_modelo
     t0 = _time.time()
     try:
-        warmup_modelo()
-        logger.info("Modelo YOLO precargado en %s (%.2fs)", _device, _time.time() - t0)
+        if DETECCION_DISPONIBLE:
+            warmup_modelo()
+            logger.info("Modelo YOLO precargado en %s (%.2fs)", _device, _time.time() - t0)
+        else:
+            logger.info("Sin PyTorch en este servidor: la detección queda solo en el equipo local")
     except Exception:
         # El warmup es solo una optimización (evita el retraso en la primera
         # detección real). Si falla, no debe tumbar el arranque de toda la app.

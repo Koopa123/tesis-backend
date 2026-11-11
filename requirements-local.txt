@@ -1,0 +1,14 @@
+# Dependencias de la laptop del local: todo lo de la nube más la detección y la medición de energía.
+# En la nube (Railway) se instala solo requirements.txt: allí no se analiza video.
+-r requirements.txt
+
+pandas==2.2.2                  # pin: evita resolver un pandas 3.x incompatible
+# Nota: pandas 2.2.2 + numpy 1.26.4 tiene un bug binario conocido en un DataFrame
+# interno de ultralytics (AutoBackend._model_type). Se evita con un parche en
+# detector/yolo_detector.py que reemplaza esa función para no usar pandas ahí.
+ultralytics                    # YOLOv8
+codecarbon==2.8.3              # registro del consumo de energía (app/core/consumo.py) y mediciones
+
+# torch/torchvision NO están aquí a propósito: instalar ANTES la build que corresponda al equipo.
+# Laptop con GPU NVIDIA (la del local):
+#   pip install torch torchvision --index-url https://download.pytorch.org/whl/cu124

@@ -11,14 +11,6 @@ python-dotenv==1.0.1          # carga el .env
 requests==2.32.3              # edge_agent.py: POST de resultados hacia la nube
 opencv-python==4.10.0.84       # procesamiento de video (requiere libs gráficas del SO, instaladas en el Dockerfile)
 numpy==1.26.4                  # pin: ultralytics 8.2.91 exige numpy<2.0.0
-pandas==2.2.2                  # pin: evita resolver un pandas 3.x incompatible
-# Nota: pandas 2.2.2 + numpy 1.26.4 tiene un bug binario conocido en un DataFrame
-# interno de ultralytics (AutoBackend._model_type). Se evita con un parche en
-# detector/yolo_detector.py que reemplaza esa función para no usar pandas ahí.
-ultralytics                    # YOLOv8 (sin pin: probando si una versión más nueva
-                                # que 8.2.91 arregla el bug de cv2.resize en LetterBox)
-
-# torch/torchvision NO están aquí a propósito: se instalan aparte (build CPU explícita)
-# mediante el Build Command de Railway, antes de este archivo (ver instrucciones de despliegue).
-# Para desarrollo local con GPU NVIDIA, instalar la build CUDA por separado:
-#   pip install torch torchvision --index-url https://download.pytorch.org/whl/cu124
+# La detección (ultralytics, PyTorch) y la medición de energía (codecarbon) NO están aquí: son solo de la
+# laptop del local y se instalan con requirements-local.txt. En la nube no se analiza video, así que la
+# imagen de Railway no las necesita (ver detector/yolo_detector.py, DETECCION_DISPONIBLE).
