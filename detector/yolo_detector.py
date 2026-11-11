@@ -10,6 +10,7 @@ Responsabilidades:
 """
 
 import json
+import logging
 import os
 import time
 from collections import deque
@@ -18,6 +19,8 @@ from threading import Condition, Lock, Thread
 import torch
 import cv2
 import numpy as np
+
+logger = logging.getLogger(__name__)
 
 # ── Modelo YOLO (carga perezosa, una sola instancia) ──────────────────────────
 
@@ -212,6 +215,7 @@ def procesar_frame(
     umbral_alto: int,
     conf_min: float = CONF_MIN_DEFAULT,
     distancia_grupo: float = DISTANCIA_GRUPO_DEFAULT,
+    frame: np.ndarray | None = None,
 ) -> dict:
     """
     Procesa un frame JPEG y devuelve:
@@ -219,9 +223,15 @@ def procesar_frame(
       total_personas — total de personas fuera de zonas de exclusión
       nivel          — clasificación según umbrales
       detecciones    — lista de bboxes normalizados con flag excluida
+
+    Si quien llama ya tiene el frame decodificado (lectura RTSP o de un video),
+    lo pasa en `frame` y se evita volver a descomprimir el JPEG: el perfilado
+    del 10/11/2026 mostró que esa descompresión era el 16 % del tiempo de esta
+    función (unos 2 ms por frame) y no aportaba nada.
     """
-    arr = np.frombuffer(frame_bytes, np.uint8)
-    frame = cv2.imdecode(arr, cv2.IMREAD_COLOR)
+    if frame is None:
+        arr = np.frombuffer(frame_bytes, np.uint8)
+        frame = cv2.imdecode(arr, cv2.IMREAD_COLOR)
     if frame is None:
         return {"personas": 0, "total_personas": 0, "nivel": "sin_aglomeracion", "detecciones": []}
 
@@ -447,7 +457,7 @@ def procesar_video_sync(
 
             _, buf = cv2.imencode(".jpg", frame, [cv2.IMWRITE_JPEG_QUALITY, 80])
             frame_bytes = buf.tobytes()
-            resultado = procesar_frame(frame_bytes, zonas_exc, umbral_m, umbral_a)
+            resultado = procesar_frame(frame_bytes, zonas_exc, umbral_m, umbral_a, frame=frame)
 
             ts_video = round(frame_num / fps, 2)
             es_nuevo_maximo = resultado["personas"] > estado.personas_maximas
@@ -618,6 +628,43 @@ def capturar_fotograma_rtsp(rtsp_url: str, descartar: int = 10) -> bytes | None:
         cap.release()
 
 
+# ── Modo batería ─────────────────────────────────────────────────────────────
+# Si se corta la luz, la laptop sigue con su batería (el UPS solo alimenta el
+# router y las cámaras). Mientras esté sin cargador se analizan a lo sumo
+# FPS_EN_BATERIA frames por segundo por cámara: la regla de alerta mira una
+# ventana de 2 s y con 5 fps tiene 10 frames, más que los 3 que exige, y la GPU
+# trabaja cerca de un tercio. Al volver la corriente se retoma el ritmo normal.
+FPS_EN_BATERIA = 5
+_REVISAR_BATERIA_CADA = 10.0
+_bateria = {"revisado": 0.0, "en_bateria": False}
+_bateria_lock = Lock()
+
+
+def en_bateria() -> bool:
+    """True si el equipo funciona con batería. Se consulta como mucho cada 10 s."""
+    ahora = time.time()
+    with _bateria_lock:
+        if ahora - _bateria["revisado"] >= _REVISAR_BATERIA_CADA:
+            _bateria["revisado"] = ahora
+            try:
+                import psutil
+                b = psutil.sensors_battery()
+                nuevo = bool(b is not None and b.power_plugged is False)
+            except Exception:
+                nuevo = False
+            if nuevo != _bateria["en_bateria"]:
+                if nuevo:
+                    logger.info("Modo batería activado: análisis a %d fps", FPS_EN_BATERIA)
+                else:
+                    logger.info("Modo batería desactivado: ritmo normal")
+            _bateria["en_bateria"] = nuevo
+        return _bateria["en_bateria"]
+
+
+def _intervalo_minimo(normal: float) -> float:
+    return max(normal, 1.0 / FPS_EN_BATERIA) if en_bateria() else normal
+
+
 # ── Procesamiento continuo de stream RTSP ────────────────────────────────────
 
 def procesar_rtsp_mjpeg(
@@ -695,7 +742,7 @@ def procesar_rtsp_mjpeg(
 
     try:
         while not cancelado():
-            espera = INTERVALO_MIN - (time.time() - ultimo_procesado)
+            espera = _intervalo_minimo(INTERVALO_MIN) - (time.time() - ultimo_procesado)
             if espera > 0:
                 time.sleep(espera)
             with cond:
@@ -710,7 +757,7 @@ def procesar_rtsp_mjpeg(
             _, buf = cv2.imencode(".jpg", frame, [cv2.IMWRITE_JPEG_QUALITY, 80])
             frame_jpeg = buf.tobytes()
             estado.agregar_frame_clip(frame_jpeg)  # buffer en RAM, no toca disco
-            resultado = procesar_frame(frame_jpeg, zonas_exc, umbral_m, umbral_a)
+            resultado = procesar_frame(frame_jpeg, zonas_exc, umbral_m, umbral_a, frame=frame)
 
             es_nuevo_maximo = resultado["personas"] > estado.personas_maximas
             alerta = estado.actualizar(resultado["personas"], resultado["nivel"])

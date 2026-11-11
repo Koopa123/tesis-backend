@@ -6,7 +6,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.config import get_settings
-from app.core import respaldo, retencion, singleton_lock
+from app.core import consumo, respaldo, retencion, singleton_lock
 from app.core.auditoria import auditar
 from app.core.rtsp_manager import cancel_all_sessions
 from app.database import close_pool, init_pool
@@ -70,6 +70,7 @@ async def lifespan(app: FastAPI):
 
     retencion.iniciar()
     respaldo.iniciar()
+    consumo.iniciar()
     # Arranques y apagados quedan en la auditoría: con ellos se mide cuánto
     # estuvo disponible el sistema en el horario de atención.
     auditar(None, None, "sistema_iniciado", "sistema", None, _INSTANCIA)
@@ -85,6 +86,7 @@ async def lifespan(app: FastAPI):
     auditar(None, None, "sistema_detenido", "sistema", None, _INSTANCIA)
     retencion.detener()
     respaldo.detener()
+    consumo.detener()
     close_pool()
     singleton_lock.release()
     logger.info("App apagada ✓")

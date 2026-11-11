@@ -72,3 +72,6 @@ Thumbs.db
 # ── Archivos de instrucciones locales (no subir al repo) ──────
 CLAUDE.md
 .claude/
+
+# ── Registro de consumo de energía (CodeCarbon, solo en la laptop) ──
+registro_consumo/
