@@ -42,6 +42,11 @@ _inference_lock = Lock()
 
 DETECCION_DISPONIBLE = torch is not None and importlib.util.find_spec("ultralytics") is not None
 DEVICE = "cuda" if torch is not None and torch.cuda.is_available() else "cpu"
+# Media precisión (FP16) en la GPU: en la medición del 13/11/2026 bajó la potencia de la GPU de 14.8 a 8.3 W con
+# dos cámaras, a los mismos 15 fps, y dio el mismo nivel de aglomeración en 992 de 992 cuadros (12 personas menos
+# en 5 077). Solo se usa en GPU; se desactiva con YOLO_FP16=0. Debe pasarse en TODAS las llamadas: el predictor
+# de ultralytics fija la precisión en la primera, y cambiarla después no tiene efecto.
+MEDIA_PRECISION = DEVICE == "cuda" and os.getenv("YOLO_FP16", "1") != "0"
 MENSAJE_SIN_DETECCION = ("El análisis de video solo está disponible en el equipo local del centro comercial.")
 
 NIVEL_ORDEN = ["sin_aglomeracion", "bajo", "medio", "alto"]
@@ -135,7 +140,7 @@ def warmup() -> None:
         # Sin device=: el modelo ya fue movido a DEVICE con .to() en _get_model();
         # re-especificarlo aquí puede disparar una reinicialización interna del
         # backend en modo CPU que rompe el preprocesamiento (cv2.resize).
-        model([frame_dummy], classes=[0], conf=CONF_MIN_DEFAULT, imgsz=416, verbose=False)
+        model([frame_dummy], classes=[0], conf=CONF_MIN_DEFAULT, imgsz=416, verbose=False, half=MEDIA_PRECISION)
 
 
 # ── Lógica de detección ───────────────────────────────────────────────────────
@@ -252,7 +257,7 @@ def procesar_frame(
     with _inference_lock:
         # imgsz reducido (default YOLO es 640) para sostener más fps (RNF-01)
         # Sin device=: el modelo ya está en DEVICE por .to() en _get_model().
-        results = model(frame, classes=[0], conf=conf_min, imgsz=416, verbose=False)[0]
+        results = model(frame, classes=[0], conf=conf_min, imgsz=416, verbose=False, half=MEDIA_PRECISION)[0]
 
     bottom_centers: list[tuple[float, float]] = []
     detecciones = []
