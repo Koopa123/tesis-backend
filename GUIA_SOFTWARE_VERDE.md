@@ -11,8 +11,9 @@ Todo cambio nuevo debe respetarlas; si alguno no puede cumplir una, hay que expl
    cámara si el back-end local ya la analiza.
 2. **Leer siempre el último cuadro.** La lectura RTSP va en su propio hilo y solo guarda el cuadro más reciente
    (`procesar_rtsp_mjpeg` en `detector/yolo_detector.py`); no se procesan cuadros atrasados.
-3. **Un solo modelo cargado.** Todas las cámaras comparten el mismo modelo, en la GPU cuando existe, protegido por
-   `_inference_lock`. No cargar un modelo por cámara ni por petición.
+3. **Un solo modelo cargado, en media precisión.** Todas las cámaras comparten el mismo modelo, en la GPU cuando
+   existe, protegido por `_inference_lock`, y en FP16 (`MEDIA_PRECISION`, todas las llamadas con `half=`). No
+   cargar un modelo por cámara ni por petición.
 4. **No codificar ni decodificar dos veces.** El búfer del clip reutiliza los mismos JPEG que ya se generan para el
    video en vivo, y el detector recibe el cuadro ya decodificado (`procesar_frame(..., frame=frame)`) en vez de
    volver a descomprimir el JPEG.
